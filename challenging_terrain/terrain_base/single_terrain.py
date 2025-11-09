@@ -341,62 +341,102 @@ class single_terrain:
         return terrain,goals,start_x + length_x_grid
 
     def gap(terrain,
-            length_x=18.0,        # 地形总长度(米)，可调整：控制整个地形区域的X方向长度
-            length_y=4.0,         # 地形总宽度(米)，可调整：控制整个地形区域的Y方向宽度
-            num_goals=8,          # 目标点数量，可调整：控制需要经过的关卡数量
-            start_x = 0,          # 起始X坐标(网格单位)，可调整：控制地形在全局中的起始位置
-            start_y = 0,          # 起始Y坐标(网格单位)，可调整：控制地形在全局中的起始位置
-            platform_size=1.0,    # 起始平台大小(米)，可调整：控制第一个平台的大小，影响起跳区域
-            difficulty = 0.5,     # 难度系数(0-1)，可调整：0=最简单(gap最窄)，1=最难(gap最宽)
-            gap_height = 2.,      # 间隙深度(米)，可调整：控制间隙的垂直深度，影响跳跃失败的惩罚
-            gap_low_range = [0.1,0.3],  # 间隙宽度范围[最小,最大](米)，可调整：控制间隙宽度的变化范围
+            length_x=18.0,        # 地形总长度(米)
+            length_y=4.0,         # 地形总宽度(米)
+            num_goals=8,          # 目标点数量
+            start_x=0,            # 起始X坐标(网格单位)
+            start_y=0,            # 起始Y坐标(网格单位)
+            platform_size=1.0,    # 起始平台大小(米)
+            difficulty=0.5,       # 难度系数(0-1) → 映射到等级0-8
+            gap_depth=1.0,        # 间隙深度(米)
             ):
         """
-        生成带有间隙(gap)的地形，机器人需要跳过这些间隙
+        BeamDojo标准GAP地形 - 按课程等级生成间隙地形
         
-        可调整的关键参数：
-        1. difficulty: 调整间隙的宽度难度
-        2. gap_height: 调整间隙的深度
-        3. gap_low_range: 调整间隙宽度的最小和最大值范围
-        4. num_goals: 调整需要跳过的间隙数量
-        5. platform_size: 调整起始平台的大小
-        6. length_x/length_y: 调整整体地形的尺寸
+        难度等级(0-8)映射:
+        - Level 0: 平台0.7m, 间隙0.1m  (最简单)
+        - Level 4: 平台0.35m, 间隙0.3m (中等)
+        - Level 8: 平台0.2m, 间隙0.5m  (最难)
+        
+        参数:
+            difficulty: 0.0~1.0 映射到等级0~8
+            platform_size: 起始平台大小
+            gap_depth: 间隙深度(掉落惩罚)
         """
         
         # 初始化目标点数组
         goals = np.zeros((num_goals, 2))
         
-        # 计算Y方向的中心位置（网格单位）
-        mid_y = round(length_y/ terrain.horizontal_scale) //2
+        # 转换基本参数为网格单位
+        length_x_grid = round(length_x / terrain.horizontal_scale)
+        length_y_grid = round(length_y / terrain.horizontal_scale)
+        init_platform_grid = round(platform_size / terrain.horizontal_scale)
+        gap_depth_grid = round(gap_depth / terrain.vertical_scale)
         
-        # 计算每个目标点之间的X方向间距（网格单位）
-        mid_x =  round((length_x - platform_size)/ terrain.horizontal_scale) // num_goals
+        # 计算Y方向中心线
+        mid_y = start_y + length_y_grid // 2
         
-        # 将平台大小转换为网格单
-        platform_size = round(platform_size/ terrain.horizontal_scale)
-        # 设置所有目标点的位置
-        for i in range(num_goals):
-            goals[i]=[start_x+platform_size+mid_x*i,start_y+mid_y]
-
-        # 根据难度系数计算间隙宽度（网格单位）
-        # difficulty越大，gap_size越接近gap_low_range[1]（最大值），难度越高
-        gap_size = round(( (gap_low_range[0]-gap_low_range[1])*difficulty + gap_low_range[1] )/terrain.horizontal_scale)
+        # === BeamDojo课程等级参数 ===
+        # 平台尺寸数组（按难度等级0-8）- 来自BeamDojo论文
+        platform_sizes = [0.7, 0.65, 0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.2]
         
-        # 计算第一个间隙的起始位置
-        gap_dis_x = start_x + platform_size + gap_size
-        gap_dis_y = start_y + mid_y
+        # 根据difficulty计算当前等级
+        difficulty_level = min(8, int(difficulty * 8))  # 映射到0-8
         
-        # 创建多个间隙
-        for i in range(num_goals):
-            # 将间隙区域的高度设置为负值（形成凹陷）
-            terrain.height_field_raw[gap_dis_x :gap_dis_x + gap_size, gap_dis_y - mid_y:gap_dis_y + mid_y] = -round(gap_height / terrain.vertical_scale)
-            # 移动到下一个间隙位置（间隔为3倍gap_size）
-            gap_dis_x += 3*gap_size
+        # 当前等级对应的平台尺寸和间距
+        current_platform_size = platform_sizes[difficulty_level]
+        max_gap_distance = 0.1 + 0.05 * difficulty_level  # 间隙宽度: 0.1m → 0.5m
         
-        # 设置起始平台为平地（高度为0）
-        terrain.height_field_raw[start_x :start_x + platform_size, start_y :start_y + mid_y*2] = 0
-
-        return terrain, goals,start_x+mid_x*num_goals
+        # 转换为网格单位
+        platform_size_grid = round(current_platform_size / terrain.horizontal_scale)
+        gap_distance_grid = round(max_gap_distance / terrain.horizontal_scale)
+        
+        # === 第1步: 先将整个区域填充为深坑(背景) ===
+        terrain.height_field_raw[start_x:start_x + length_x_grid, 
+                                start_y:start_y + length_y_grid] = -gap_depth_grid
+        
+        # === 第2步: 创建起始平台(平地) ===
+        terrain.height_field_raw[start_x:start_x + init_platform_grid, 
+                                start_y:start_y + length_y_grid] = 0
+        
+        # === 第3步: 按照BeamDojo标准生成平台序列 ===
+        current_x = start_x + init_platform_grid
+        goal_idx = 0
+        
+        # 循环生成: [平台] → [间隙] → [平台] → [间隙] → ...
+        # 注意: 持续生成平台直到填满整个区域,不受目标点数量限制
+        while current_x < start_x + length_x_grid:
+            # 创建平台(高度=0)
+            platform_end = min(current_x + platform_size_grid, start_x + length_x_grid)
+            terrain.height_field_raw[current_x:platform_end, 
+                                    start_y:start_y + length_y_grid] = 0
+            
+            # 在平台中心放置目标点(只在还需要目标点时)
+            if goal_idx < num_goals:
+                platform_center_x = current_x + platform_size_grid // 2
+                if platform_center_x < start_x + length_x_grid:
+                    goals[goal_idx] = [platform_center_x, mid_y]
+                    goal_idx += 1
+            
+            # 移动到下一个位置
+            current_x += platform_size_grid
+            
+            # 创建间隙(保持深坑,高度=-gap_depth_grid)
+            if current_x < start_x + length_x_grid:
+                gap_end = min(current_x + gap_distance_grid, start_x + length_x_grid)
+                # 间隙区域已经是深坑了,不需要额外操作
+                current_x = gap_end
+        
+        # === 第4步: 如果目标点不足(不应该发生),补齐到num_goals ===
+        if goal_idx < num_goals:
+            print(f"Warning: Only generated {goal_idx}/{num_goals} goals in gap terrain")
+            # 用最后一个有效目标点复制填充
+            if goal_idx > 0:
+                last_goal = goals[goal_idx - 1]
+                for i in range(goal_idx, num_goals):
+                    goals[i] = last_goal
+        
+        return terrain, goals, start_x + length_x_grid
     
     def plot(terrain,
             length_x=18.,

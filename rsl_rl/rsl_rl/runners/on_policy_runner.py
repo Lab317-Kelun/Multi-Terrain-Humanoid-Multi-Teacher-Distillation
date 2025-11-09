@@ -434,15 +434,29 @@ class OnPolicyRunner:
         
         if hasattr(self.env, 'total_times') and hasattr(self.env, 'success_times') and hasattr(self.env, 'complete_times'):
             if self.env.total_times > 0:
-                if len(locs.get('lenbuffer', [])) > 0:
-                    mean_ep_len_steps = statistics.mean(locs['lenbuffer'])
-                    survival_time = float(mean_ep_len_steps) * float(getattr(self.env, 'dt', 0.02))
-                    threshold = float(getattr(getattr(self.env.cfg, 'curriculum_config', object()), 'survival_time_threshold', getattr(self.env, 'max_episode_length_s', 1.0)))
-                    print("survival_time:", survival_time, "threshold:", threshold)
-                    success_rate = survival_time / threshold if threshold > 0 else 0.0
-                else:
-                    # Fallback to previous definition if no episode lengths yet
+                # 获取成功率计算模式配置
+                curriculum_config = getattr(self.env.cfg, 'curriculum_config', object())
+                success_rate_mode = getattr(curriculum_config, 'success_rate_mode', 'survival_time')
+                
+                # 根据配置选择成功率计算方式
+                if success_rate_mode == 'survival_time':
+                    # 方式1: 基于存活时间计算成功率
+                    if len(locs.get('lenbuffer', [])) > 0:
+                        mean_ep_len_steps = statistics.mean(locs['lenbuffer'])
+                        survival_time = float(mean_ep_len_steps) * float(getattr(self.env, 'dt', 0.02))
+                        threshold = float(getattr(curriculum_config, 'survival_time_threshold', getattr(self.env, 'max_episode_length_s', 1.0)))
+                        success_rate = survival_time / threshold if threshold > 0 else 0.0
+                    else:
+                        # 如果没有episode长度数据,回退到目标计算方式
+                        success_rate = self.env.success_times / self.env.total_times
+                elif success_rate_mode == 'goal_based':
+                    # 方式2: 基于目标完成度计算成功率
                     success_rate = self.env.success_times / self.env.total_times
+                else:
+                    # 未知模式,使用默认(目标模式)
+                    print(f"Warning: Unknown success_rate_mode '{success_rate_mode}', using 'goal_based'")
+                    success_rate = self.env.success_times / self.env.total_times
+                
                 completion_rate = self.env.complete_times / self.env.total_times
                 wandb_dict['Episode_rew/success_rate'] = success_rate
                 wandb_dict['Episode_rew/completion_rate'] = completion_rate

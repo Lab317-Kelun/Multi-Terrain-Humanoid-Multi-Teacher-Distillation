@@ -209,9 +209,9 @@ class HumanoidRobot(BaseTask):
         if(self.cfg.rewards.is_play):
             if(self.total_times > 0):
                 if(self.total_times > self.last_times):
-                    # print("total_times=",self.total_times)
-                    # print("success_rate=",self.success_times / self.total_times)
-                    # print("complete_rate=",(self.complete_times / self.total_times).cpu().numpy().copy())
+                    print("total_times=",self.total_times)
+                    print("success_rate=",self.success_times / self.total_times)
+                    print("complete_rate=",(self.complete_times / self.total_times).cpu().numpy().copy())
                     self.last_times = self.total_times
                     
         use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
@@ -383,8 +383,10 @@ class HumanoidRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        length = (self.cfg.terrain.terrain_length / 2) - 0.2
-        width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
+        # length = (self.cfg.terrain.terrain_length / 2) - 0.2
+        # width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
+        length = self.cfg.terrain.terrain_length- 0.2
+        width = self.cfg.terrain.terrain_width - 0.2
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
@@ -482,6 +484,10 @@ class HumanoidRobot(BaseTask):
         self.action_history_buf[env_ids, :, :] = 0.
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
+        
+        # reset goal distance tracking for reach_goal reward
+        distance_to_goal = torch.norm(self.root_states[env_ids, :2] - self.cur_goals[env_ids, :2], dim=1)
+        self.last_distance_to_goal[env_ids] = distance_to_goal
 
         # fill extras
         self.extras["episode"] = {}
@@ -1149,6 +1155,7 @@ class HumanoidRobot(BaseTask):
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
+        self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         
         str_rng = self.cfg.domain_rand.motor_strength_range
         self.motor_strength = (str_rng[1] - str_rng[0]) * torch.rand(2, self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False) + str_rng[0]
@@ -1227,7 +1234,7 @@ class HumanoidRobot(BaseTask):
                                             self.cfg.depth.buffer_len, 
                                             self.cfg.depth.resized[1], 
                                             self.cfg.depth.resized[0]).to(self.device)
-
+        
     def _prepare_reward_function(self):
         """ Prepares a list of reward functions, whcih will be called to compute the total reward.
             Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
@@ -1981,6 +1988,27 @@ class HumanoidRobot(BaseTask):
         ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error/self.cfg.rewards.tracking_sigma)
     
+    def _reward_heading_tracking(self):
+        heading_error = wrap_to_pi(self.target_yaw - self.yaw)
+        return torch.exp(-torch.abs(heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
+    
+    def _reward_next_heading_tracking(self):
+        next_heading_error = wrap_to_pi(self.next_target_yaw - self.yaw)
+        return torch.exp(-torch.abs(next_heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
+
+    def _reward_reach_goal(self):
+        """靠近目标奖励,远离目标惩罚"""
+        distance_to_goal = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1)
+        # 计算距离变化: 负值=靠近(给奖励), 正值=远离(给惩罚)
+        distance_change = distance_to_goal - self.last_distance_to_goal
+        self.last_distance_to_goal = distance_to_goal
+        # 返回负的距离变化: 靠近->正奖励, 远离->负惩罚
+        return -distance_change
+    
+    def _reward_center(self):
+        y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
+        return y_offset
+    
     # def _reward_base_height(self):
     #     # Penalize base height away from target
     #     base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
@@ -2186,9 +2214,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing +0.01
-            y_start = - num_y / 2 * spacing + 9
-            x_end = -x_start +0.08
-            y_end = -y_start + 18
+            y_start = - num_y / 2 * spacing # +9
+            x_end = -x_start + 0.08
+            y_end = -y_start #+18
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
