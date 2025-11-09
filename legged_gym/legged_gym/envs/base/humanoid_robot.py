@@ -901,20 +901,20 @@ class HumanoidRobot(BaseTask):
             ).squeeze(1)
             
         if self.cfg.commands.heading_command:
-            # if hasattr(self, 'target_yaw') and hasattr(self, 'yaw'):
-            #     self.commands[env_ids, 3] = self.target_yaw[env_ids]
-            # else:
-            #     self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-
-            # if hasattr(self, 'target_yaw') and hasattr(self, 'yaw'):
-            #     yaw_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
-            #     self.commands[env_ids, 2] =  0.8 * yaw_error
-            if hasattr(self, 'yaw'):
+            if hasattr(self, 'target_yaw') and hasattr(self, 'yaw'):
+                self.commands[env_ids, 3] = self.target_yaw[env_ids]
+            else:
                 self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+
+            if hasattr(self, 'target_yaw') and hasattr(self, 'yaw'):
                 yaw_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
                 self.commands[env_ids, 2] =  0.8 * yaw_error
-            else:
-                self.commands[env_ids, 2] = 0.0
+            # if hasattr(self, 'yaw'):
+            #     self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
+            #     yaw_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
+            #     self.commands[env_ids, 2] =  0.8 * yaw_error
+            # else:
+            #     self.commands[env_ids, 2] = 0.0
             
         else:
             self.commands[env_ids, 2] = torch_rand_float(
