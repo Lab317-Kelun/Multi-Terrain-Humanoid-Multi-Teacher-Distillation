@@ -383,10 +383,10 @@ class HumanoidRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        # length = (self.cfg.terrain.terrain_length / 2) - 0.2
-        # width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
-        length = self.cfg.terrain.terrain_length- 0.2
-        width = self.cfg.terrain.terrain_width - 0.2
+        length = (self.cfg.terrain.terrain_length / 2) - 0.2
+        width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
+        # length = self.cfg.terrain.terrain_length- 0.2
+        # width = self.cfg.terrain.terrain_width - 0.2
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
@@ -2213,10 +2213,10 @@ class HumanoidRobot(BaseTask):
             
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
-            x_start = - num_x / 2 * spacing +0.01
-            y_start = - num_y / 2 * spacing # +9
+            x_start = - num_x / 2 * spacing + 0.01
+            y_start = - num_y / 2 * spacing + 9
             x_end = -x_start + 0.08
-            y_end = -y_start #+18
+            y_end = -y_start + 18
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
