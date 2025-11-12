@@ -257,7 +257,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
-            heading_tracking = 1.0 #2.0 3.0
+            # heading_tracking = 1.0 #2.0 3.0
             # next_heading_tracking = 0.5 #1.5 2.0
             # reach_goal = 2.0
             # center = -1.0 
@@ -321,7 +321,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            "heading_tracking", 
+            # "heading_tracking", 
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
