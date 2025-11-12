@@ -777,7 +777,7 @@ class single_terrain:
         stone_size_grid = round(stone_size / terrain.horizontal_scale)
         
         # 石块间距：0.05 × ⌈l/2⌉
-        stone_distance = 0.03 * np.ceil(difficulty_level / 2.0)
+        stone_distance = 0.05 * np.ceil(difficulty_level / 2.0)
         stone_distance_grid = round(stone_distance / terrain.horizontal_scale)
         
         # 子网格尺寸 = 石块尺寸 + 间距

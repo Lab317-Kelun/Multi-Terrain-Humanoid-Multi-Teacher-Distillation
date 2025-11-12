@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 4 #与课程学习有关 
+        episode_length_s = 20 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -84,13 +84,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 4  # 存活时间阈值（秒）
-        survival_success_threshold = 2  # 连续存活成功次数阈值
-        survival_failure_threshold = 3   # 连续存活失败次数阈值
+        survival_time_threshold = 20  # 存活时间阈值（秒）
+        survival_success_threshold = 3  # 连续存活成功次数阈值
+        survival_failure_threshold = 2   # 连续存活失败次数阈值
         
         # 速度模式参数
-        velocity_success_threshold = 2  # 连续速度成功次数阈值
-        velocity_failure_threshold = 3   # 连续速度失败次数阈值
+        velocity_success_threshold = 3  # 连续速度成功次数阈值
+        velocity_failure_threshold = 2   # 连续速度失败次数阈值
         
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
@@ -257,8 +257,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
-            # heading_tracking = 3.0 #2.0 3.0
-            # next_heading_tracking = 2.0 #1.5 2.0
+            heading_tracking = 1.0 #2.0 3.0
+            # next_heading_tracking = 0.5 #1.5 2.0
             # reach_goal = 2.0
             # center = -1.0 
               
@@ -321,7 +321,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            # "heading_tracking", "next_heading_tracking", 
+            "heading_tracking", 
+            # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "base_height", "deviation_hip_joint", "deviation_ankle_joint", 
