@@ -292,22 +292,6 @@ class HumanoidRobot(BaseTask):
         target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
         self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
 
-        if self.cfg.commands.heading_command:
-            self.commands[:, 3] = self.target_yaw
-            yaw_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
-            self.commands[:, 2] = 0.8 * yaw_error
-        else:
-            self.commands[:, 2] = torch_rand_float(
-                self.command_ranges["ang_vel_yaw"][0],
-                self.command_ranges["ang_vel_yaw"][1],
-                (self.num_envs, 1), device=self.device
-            ).squeeze(1)
-
-        small_command_mask = torch.abs(self.commands[:, 2]) <= self.cfg.commands.ang_vel_clip
-        self.commands[:, 2] = torch.where(small_command_mask, 
-                                         torch.zeros_like(self.commands[:, 2]), 
-                                         self.commands[:, 2])
-
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations 
@@ -821,6 +805,12 @@ class HumanoidRobot(BaseTask):
         
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
+        
+        if self.cfg.commands.heading_command:
+            self.commands[:, 3] = self.target_yaw
+            yaw_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+            self.commands[:, 2] = torch.clip(0.8 * yaw_error, -1., 1.)
+            self.commands[:, 2] *= torch.abs(self.commands[:, 2]) > self.cfg.commands.ang_vel_clip
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -916,12 +906,26 @@ class HumanoidRobot(BaseTask):
                 self.command_ranges["lin_vel_y"][1],
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
+            
+        # Stage2模式下，commands[3]在_update_goals中根据target_yaw设置，不需要在这里随机生成
+        if not self.cfg.commands.heading_command:
+            self.commands[env_ids, 2] = torch_rand_float(
+                self.command_ranges["ang_vel_yaw"][0],
+                self.command_ranges["ang_vel_yaw"][1],
+                (len(env_ids), 1), device=self.device
+            ).squeeze(1)
 
-        small_lin_vel_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
-        self.commands[env_ids, 0] = torch.where(small_lin_vel_mask, 
+        small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
+        self.commands[env_ids, 2] = torch.where(small_command_mask, 
+                                                torch.zeros_like(self.commands[env_ids, 2]), 
+                                                self.commands[env_ids, 2])
+
+        small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
+        small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
+        self.commands[env_ids, 0] = torch.where(small_lin_vel_x_mask, 
                                                torch.zeros_like(self.commands[env_ids, 0]), 
                                                self.commands[env_ids, 0])
-        self.commands[env_ids, 1] = torch.where(small_lin_vel_mask, 
+        self.commands[env_ids, 1] = torch.where(small_lin_vel_y_mask, 
                                                torch.zeros_like(self.commands[env_ids, 1]), 
                                                self.commands[env_ids, 1])
 
