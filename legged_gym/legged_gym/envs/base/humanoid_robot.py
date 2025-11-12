@@ -812,7 +812,7 @@ class HumanoidRobot(BaseTask):
             self.commands[:, 2] = torch.clip(0.8 * yaw_error, -1., 1.)
             self.commands[:, 2] *= torch.abs(self.commands[:, 2]) > self.cfg.commands.ang_vel_clip
 
-        if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+        if self.cfg.domain_rand.push_robots and (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
     
     def _gather_cur_goals(self, future=0):
