@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 20 #与课程学习有关 
+        episode_length_s = 80 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -71,6 +71,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # 启用接触信息
         include_foot_contacts = True
         
+        next_goal_threshold = 0.5
+        reach_goal_delay = 0.05
+        num_future_goal_obs = 2
+        
     # 课程学习配置
     class curriculum_config:
         # === 课程学习成功判定模式 ===
@@ -80,8 +84,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         success_rate_mode = 'goal_based'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
         
         # 目标到达模式参数
-        success_threshold = 3  # 连续成功次数阈值
-        failure_threshold = 2  # 连续失败次数阈值
+        success_threshold = 2  # 连续成功次数阈值
+        failure_threshold = 3  # 连续失败次数阈值
          
         # 存活时间模式参数
         survival_time_threshold = 4  # 存活时间阈值（秒）
@@ -234,9 +238,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
-        resampling_time = 4.0         # 命令重采样时间间隔（秒）
+        resampling_time = 4.0         # 命令重采样时间间隔（秒） 1
         heading_command = True         # 启用朝向命令模式
-        ang_vel_clip = 0.1            # 角速度命令死区阈值
+        ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
         # 策略1：智能速度生成配置
@@ -245,7 +249,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.0, 1.2] # min max [m/s]
+            lin_vel_x = [0.3, 1.2] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
             heading = [0.0, 0.0]
@@ -254,11 +258,11 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         """BEAMDOJO奖励配置"""
         class scales:
-            tracking_x_vel = 1.5
+            tracking_x_vel = 2.5 #1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
-            heading_tracking = 3.0 #2.0
-            next_heading_tracking = 2.0 #1.5
+            heading_tracking = 1.0 #2.0 1.0 1.5
+            next_heading_tracking = 0.5 #1.5 0.5 1.0
             # reach_goal = 2.0
             # center = -1.0 
               
@@ -322,7 +326,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", "next_heading_tracking", 
-            "reach_goal","center",
+            # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "base_height", "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",

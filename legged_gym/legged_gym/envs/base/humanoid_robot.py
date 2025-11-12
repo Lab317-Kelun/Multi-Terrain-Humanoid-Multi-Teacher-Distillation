@@ -292,6 +292,22 @@ class HumanoidRobot(BaseTask):
         target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
         self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
 
+        if self.cfg.commands.heading_command:
+            self.commands[:, 3] = self.target_yaw
+            yaw_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+            self.commands[:, 2] = 0.8 * yaw_error
+        else:
+            self.commands[:, 2] = torch_rand_float(
+                self.command_ranges["ang_vel_yaw"][0],
+                self.command_ranges["ang_vel_yaw"][1],
+                (self.num_envs, 1), device=self.device
+            ).squeeze(1)
+
+        small_command_mask = torch.abs(self.commands[:, 2]) <= self.cfg.commands.ang_vel_clip
+        self.commands[:, 2] = torch.where(small_command_mask, 
+                                         torch.zeros_like(self.commands[:, 2]), 
+                                         self.commands[:, 2])
+
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations 
@@ -630,6 +646,7 @@ class HumanoidRobot(BaseTask):
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
         # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
+        
         obs_buf = torch.cat((
                             #skill_vector, 
                             # self.base_ang_vel  * self.obs_scales.ang_vel,   #[1,3] # 3
@@ -899,34 +916,6 @@ class HumanoidRobot(BaseTask):
                 self.command_ranges["lin_vel_y"][1],
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
-            
-        if self.cfg.commands.heading_command:
-            if hasattr(self, 'target_yaw') and hasattr(self, 'yaw'):
-                self.commands[env_ids, 3] = self.target_yaw[env_ids]
-            else:
-                self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-
-            if hasattr(self, 'target_yaw') and hasattr(self, 'yaw'):
-                yaw_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
-                self.commands[env_ids, 2] =  0.8 * yaw_error
-            # if hasattr(self, 'yaw'):
-            #     self.commands[env_ids, 3] = torch_rand_float(self.command_ranges["heading"][0], self.command_ranges["heading"][1], (len(env_ids), 1), device=self.device).squeeze(1)
-            #     yaw_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
-            #     self.commands[env_ids, 2] =  0.8 * yaw_error
-            # else:
-            #     self.commands[env_ids, 2] = 0.0
-            
-        else:
-            self.commands[env_ids, 2] = torch_rand_float(
-                self.command_ranges["ang_vel_yaw"][0],
-                self.command_ranges["ang_vel_yaw"][1],
-                (len(env_ids), 1), device=self.device
-            ).squeeze(1)
-
-        small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
-        self.commands[env_ids, 2] = torch.where(small_command_mask, 
-                                                torch.zeros_like(self.commands[env_ids, 2]), 
-                                                self.commands[env_ids, 2])
 
         small_lin_vel_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         self.commands[env_ids, 0] = torch.where(small_lin_vel_mask, 
@@ -935,7 +924,6 @@ class HumanoidRobot(BaseTask):
         self.commands[env_ids, 1] = torch.where(small_lin_vel_mask, 
                                                torch.zeros_like(self.commands[env_ids, 1]), 
                                                self.commands[env_ids, 1])
-
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.

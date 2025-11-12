@@ -385,7 +385,7 @@ class single_terrain:
         
         # 当前等级对应的平台尺寸和间距
         current_platform_size = platform_sizes[difficulty_level]
-        max_gap_distance = 0.1 + 0.05 * difficulty_level  # 间隙宽度: 0.1m → 0.5m
+        max_gap_distance = 0.05 + 0.04375 * difficulty_level  # 间隙宽度: 0.05m → 0.4m
         
         # 转换为网格单位
         platform_size_grid = round(current_platform_size / terrain.horizontal_scale)
