@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 8 #与课程学习有关 
+        episode_length_s = 4 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -84,7 +84,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 8  # 存活时间阈值（秒）
+        survival_time_threshold = 4  # 存活时间阈值（秒）
         survival_success_threshold = 2  # 连续存活成功次数阈值
         survival_failure_threshold = 3   # 连续存活失败次数阈值
         
@@ -235,8 +235,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
         num_commands = 5 # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height, orientation
-        resampling_time = 8.0         # 命令重采样时间间隔（秒）
-        heading_command = False         # 启用朝向命令模式
+        resampling_time = 4.0         # 命令重采样时间间隔（秒）
+        heading_command = True         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
@@ -258,7 +258,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
-            # heading_tracking = 1.0 #2.0 3.0
+            heading_tracking = 1.0 #2.0 3.0
             # next_heading_tracking = 0.5 #1.5 2.0
             # reach_goal = 2.0
             # center = -1.0 
@@ -322,7 +322,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            # "heading_tracking", 
+            "heading_tracking", 
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
