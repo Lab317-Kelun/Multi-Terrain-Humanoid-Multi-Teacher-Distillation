@@ -628,7 +628,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -808,8 +808,14 @@ class HumanoidRobot(BaseTask):
         if self.cfg.commands.heading_command:
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
-            self.commands[:, 2] = torch.clip(0.8*wrap_to_pi(self.commands[:, 3] - heading), -1., 1.)
-            self.commands[:, 2] *= torch.abs(self.commands[:, 2]) > self.cfg.commands.ang_vel_clip
+            heading_error = wrap_to_pi(self.commands[:, 3] - heading)
+            # 使用PD控制器计算角速度命令，避免死区导致的跳跃
+            ang_vel_cmd = 0.8 * heading_error
+            # 应用死区：小于阈值的命令设为0，但保持连续性
+            small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
+            self.commands[:, 2] = torch.where(small_command_mask, 
+                                            torch.zeros_like(ang_vel_cmd), 
+                                            torch.clip(ang_vel_cmd, -1., 1.))
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -2006,15 +2012,17 @@ class HumanoidRobot(BaseTask):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
         return y_offset
     
+    def _reward_tracking_base_height(self):
+        base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
+        base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
+        base_height = torch.max(base_height_l, base_height_r)
+        height_error = torch.abs(base_height - self.cfg.rewards.base_height_target + self.cfg.asset.ankle_sole_distance)
+        return torch.exp(-height_error / self.cfg.rewards.tracking_sigma)
+
     # def _reward_base_height(self):
     #     # Penalize base height away from target
-    #     base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
+    #     base_height = torch.mean(self.root_states[:, 2].unsqueeze(1))
     #     return torch.square(base_height - self.cfg.rewards.base_height_target)
-
-    def _reward_base_height(self):
-        # Penalize base height away from target
-        base_height = torch.mean(self.root_states[:, 2].unsqueeze(1))
-        return torch.square(base_height - self.cfg.rewards.base_height_target)
 
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity

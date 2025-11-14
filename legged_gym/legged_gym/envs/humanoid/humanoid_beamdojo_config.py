@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 20 #与课程学习有关 
+        episode_length_s = 8 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -84,9 +84,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 20  # 存活时间阈值（秒）
-        survival_success_threshold = 3  # 连续存活成功次数阈值
-        survival_failure_threshold = 2   # 连续存活失败次数阈值
+        survival_time_threshold = 8  # 存活时间阈值（秒）
+        survival_success_threshold = 2  # 连续存活成功次数阈值
+        survival_failure_threshold = 3   # 连续存活失败次数阈值
         
         # 速度模式参数
         velocity_success_threshold = 3  # 连续速度成功次数阈值
@@ -234,7 +234,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
-        resampling_time = 4.0         # 命令重采样时间间隔（秒）
+        resampling_time = 8.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
@@ -247,7 +247,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         class ranges( LeggedRobotCfg.commands.ranges ):
             lin_vel_x = [-0.8, 1.2] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
-            ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
+            ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
             heading = [-1.0, 1.0]
             # height = [-0.5, 0.0]
                         
@@ -257,18 +257,18 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
-            # heading_tracking = 1.0 #2.0 3.0
+            heading_tracking = 1.0 #2.0 3.0
             # next_heading_tracking = 0.5 #1.5 2.0
             # reach_goal = 2.0
             # center = -1.0 
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
-            orientation = -5.0 #-1.5 -2.0 -5.0 -10.0
+            orientation = -1.5 #-1.5 -2.0 -5.0 -10.0
             action_rate = -0.01
             
-            base_height = -10
-            # tracking_base_height = 2.
+            # base_height = -10.0
+            tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -294,7 +294,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             contact_momentum = 2.5e-4
             action_vanish = -1.0
             stand_still = -0.15   
-            termination = -20 #-10 -20 -30
+            # termination = -20 #-10 -20 -30
             
             foothold = 0.1 #1.0 0.05 0.15 0.25 0.1 0.12
             
@@ -321,17 +321,18 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            # "heading_tracking", 
+            "heading_tracking", 
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            "base_height", "deviation_hip_joint", "deviation_ankle_joint", 
+            "tracking_base_height", "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",
             "feet_stumble", "torques", "dof_vel", "dof_vel_limits", "torque_limits",
             "no_fly", "feet_slip", "feet_contact_forces",
-            "contact_momentum", "action_vanish", "stand_still",'termination'
+            "contact_momentum", "action_vanish", "stand_still",
+            # 'termination'
         ]
         sparse_rewards = ['foothold']
         
