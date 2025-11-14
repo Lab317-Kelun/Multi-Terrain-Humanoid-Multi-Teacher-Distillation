@@ -815,7 +815,7 @@ class HumanoidRobot(BaseTask):
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
                                             torch.zeros_like(ang_vel_cmd), 
-                                            torch.clip(ang_vel_cmd, -1., 1.))
+                                            ang_vel_cmd)
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
