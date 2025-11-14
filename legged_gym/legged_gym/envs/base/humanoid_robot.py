@@ -646,6 +646,7 @@ class HumanoidRobot(BaseTask):
                             # self.action_history_buf[:, -1], # 12
                             # self.contact_filt.float()-0.5, # 2
                             noisy_commands,   #3 x y yaw
+                            self.commands[:, 4].unsqueeze(1), #height
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
@@ -809,13 +810,11 @@ class HumanoidRobot(BaseTask):
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
             heading_error = wrap_to_pi(self.commands[:, 3] - heading)
-            # 使用PD控制器计算角速度命令，避免死区导致的跳跃
             ang_vel_cmd = 0.8 * heading_error
-            # 应用死区：小于阈值的命令设为0，但保持连续性
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
                                             torch.zeros_like(ang_vel_cmd), 
-                                            torch.clip(ang_vel_cmd, -1., 1.))
+                                            ang_vel_cmd)
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -897,6 +896,9 @@ class HumanoidRobot(BaseTask):
         return adaptive_speeds
     
     def _resample_commands(self, env_ids):
+        set_x = torch.rand(len(env_ids), 1).to(self.device)
+        is_height = set_x < 1/3
+        is_vel = set_x > 1/2
         if self.cfg.commands.height_adaptive_speed:
             adaptive_speeds = self._generate_adaptive_speed(env_ids)
             self.commands[env_ids, 0] = adaptive_speeds
@@ -905,25 +907,35 @@ class HumanoidRobot(BaseTask):
                 self.command_ranges["lin_vel_x"][0],
                 self.command_ranges["lin_vel_x"][1],
                 (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+            * is_vel).squeeze(1)
             self.commands[env_ids, 1] = torch_rand_float(
                 self.command_ranges["lin_vel_y"][0],
                 self.command_ranges["lin_vel_y"][1],
                 (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+            * is_vel).squeeze(1)
             
         if self.cfg.commands.heading_command:
             self.commands[env_ids, 3] = torch_rand_float(
                 self.command_ranges["heading"][0], 
                 self.command_ranges["heading"][1], 
                 (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+            * is_vel).squeeze(1)
+            self.commands[env_ids, 4] = (torch_rand_float(
+                self.command_ranges["height"][0], 
+                self.command_ranges["height"][1], 
+                (len(env_ids), 1), device=self.device) 
+            * is_height).squeeze(1) + self.cfg.rewards.base_height_target # height
         else:
             self.commands[env_ids, 2] = torch_rand_float(
                 self.command_ranges["ang_vel_yaw"][0],
                 self.command_ranges["ang_vel_yaw"][1],
                 (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+            * is_vel).squeeze(1)
+            self.commands[env_ids, 4] = (torch_rand_float(
+                self.command_ranges["height"][0], 
+                self.command_ranges["height"][1], 
+                (len(env_ids), 1), device=self.device) 
+            * is_height).squeeze(1) + self.cfg.rewards.base_height_target # height
 
         small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
         self.commands[env_ids, 2] = torch.where(small_command_mask, 
@@ -2012,21 +2024,9 @@ class HumanoidRobot(BaseTask):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
         return y_offset
     
-    def _reward_tracking_base_height(self):
-        base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
-        base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
-        base_height = torch.max(base_height_l, base_height_r)
-        height_error = torch.abs(base_height - self.cfg.rewards.base_height_target + self.cfg.asset.ankle_sole_distance)
-        return torch.exp(-height_error / self.cfg.rewards.tracking_sigma)
-
-    # def _reward_base_height(self):
-    #     # Penalize base height away from target
-    #     base_height = torch.mean(self.root_states[:, 2].unsqueeze(1))
-    #     return torch.square(base_height - self.cfg.rewards.base_height_target)
-
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
-        return torch.square(self.base_lin_vel[:, 2])
+        return torch.square(self.base_lin_vel[:, 2]) *  (self.commands[:, 4] >= 0.735)
         
     def _reward_ang_vel_xy(self):
         # Penalize xy axes base angular velocity
@@ -2040,33 +2040,30 @@ class HumanoidRobot(BaseTask):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
     
-    # def _reward_tracking_base_height(self):
-    #     base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
-    #     base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
-    #     base_height = torch.max(base_height_l, base_height_r)
-    #     height_error = torch.abs(base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance)
-    #     return torch.exp(-height_error * 4)
+    def _reward_tracking_base_height(self):
+        base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
+        base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
+        base_height = torch.max(base_height_l, base_height_r)
+        height_error = torch.abs(base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance)
+        return torch.exp(-height_error * 4)
     
     def _reward_deviation_hip_joint(self):
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1)
+        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1) *  (self.commands[:, 4] >= 0.735)
     
     def _reward_deviation_ankle_joint(self):
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.ankle_joint_indices], dim=-1)
-    
+        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.ankle_joint_indices], dim=-1) *  (self.commands[:, 4] >= 0.735)
+        
     def _reward_deviation_knee_joint(self):
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.knee_joint_indices], dim=-1)
+        height_error = (self.root_states[:, 2] - self.commands[:, 4])
+        knee_action_min = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_min[:, self.knee_joint_indices]
+        knee_action_max = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_max[:, self.knee_joint_indices]
+        joint_deviation = (self.dof_pos[:, self.knee_joint_indices] - knee_action_min) / (knee_action_max - knee_action_min) # always positive
+        return torch.sum(torch.abs((joint_deviation-0.5) * height_error.unsqueeze(-1)), dim=-1)
     
-    # def _reward_deviation_knee_joint(self):
-    #     height_error = (self.root_states[:, 2] - self.commands[:, 4])
-    #     knee_action_min = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_min[:, self.knee_joint_indices]
-    #     knee_action_max = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_max[:, self.knee_joint_indices]
-    #     joint_deviation = (self.dof_pos[:, self.knee_joint_indices] - knee_action_min) / (knee_action_max - knee_action_min) # always positive
-    #     return torch.sum(torch.abs((joint_deviation-0.5) * height_error.unsqueeze(-1)), dim=-1)
-
     def _reward_dof_acc(self):
         # Penalize dof accelerations
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
-    
+        
     def _reward_dof_pos_limits(self):
         # Penalize dof positions too close to the limit
         out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0])[:, :self.num_actions].clip(max=0.) # lower limit

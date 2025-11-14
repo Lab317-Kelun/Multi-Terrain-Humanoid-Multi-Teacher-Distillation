@@ -61,7 +61,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 75  # 实际obs_buf维度：3+3+3+27+27+12=75
+        n_proprio = 76  # 实际obs_buf维度：3+1+3+3+27+27+12=76
         history_len = 10
         
         # 重新计算总观测维度
@@ -234,6 +234,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
+        num_commands = 5 # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height, orientation
         resampling_time = 8.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
@@ -249,7 +250,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
             heading = [-1.0, 1.0]
-            # height = [-0.5, 0.0]
+            height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
         """BEAMDOJO奖励配置"""
@@ -354,11 +355,12 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         noise_level = 1.0
         
         class noise_scales:
-            dof_pos = 0.05
+            dof_pos = 0.02
             dof_vel = 2.0
             lin_vel = 0.1
-            ang_vel = 0.1
+            ang_vel = 0.5
             gravity = 0.05
+            height_measurement = 0.1
 
     class sim:
         """仿真配置"""
