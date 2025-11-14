@@ -236,7 +236,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         curriculum = True           # 是否启用课程学习
         num_commands = 5 # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height, orientation
         resampling_time = 8.0         # 命令重采样时间间隔（秒）
-        heading_command = True         # 启用朝向命令模式
+        heading_command = False         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
@@ -322,7 +322,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            "heading_tracking", 
+            # "heading_tracking", 
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
@@ -341,7 +341,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """归一化配置"""
         class obs_scales:
             lin_vel = 2.0
-            ang_vel = 0.25
+            ang_vel = 0.5
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
