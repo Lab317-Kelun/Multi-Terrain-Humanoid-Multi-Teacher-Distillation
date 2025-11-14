@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 8 #与课程学习有关 
+        episode_length_s = 4.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -84,9 +84,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 8  # 存活时间阈值（秒）
-        survival_success_threshold = 2  # 连续存活成功次数阈值
-        survival_failure_threshold = 3   # 连续存活失败次数阈值
+        survival_time_threshold = 4.0  # 存活时间阈值（秒）
+        survival_success_threshold = 3  # 连续存活成功次数阈值
+        survival_failure_threshold = 2   # 连续存活失败次数阈值
         
         # 速度模式参数
         velocity_success_threshold = 3  # 连续速度成功次数阈值
@@ -234,7 +234,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
-        resampling_time = 8.0         # 命令重采样时间间隔（秒）
+        resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
@@ -245,10 +245,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.8, 1.2] # min max [m/s]
-            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+            lin_vel_x = [-0.8, 1.2] # min max [m/s]
+            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
-            heading = [-0.0, 0.0]
+            heading = [-1.0, 1.0]
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -340,7 +340,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """归一化配置"""
         class obs_scales:
             lin_vel = 2.0
-            ang_vel = 0.25
+            ang_vel = 0.5
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
@@ -352,14 +352,14 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """噪声配置"""
         add_noise = True
         noise_level = 1.0
-        
         class noise_scales:
-            dof_pos = 0.05
+            dof_pos = 0.02
             dof_vel = 2.0
             lin_vel = 0.1
-            ang_vel = 0.1
+            ang_vel = 0.5
             gravity = 0.05
-
+            height_measurement = 0.1
+            
     class sim:
         """仿真配置"""
         dt = 0.005

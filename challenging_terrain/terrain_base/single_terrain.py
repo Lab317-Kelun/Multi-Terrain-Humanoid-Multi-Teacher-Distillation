@@ -710,9 +710,9 @@ class single_terrain:
         middle_gap_grid = round(middle_gap_width / terrain.horizontal_scale)
         
         # Y方向分成三个区域：左边8米 + 中间1米 + 右边8米
-        left_region_width = 8.0  # 左边区域宽度(米)
+        left_region_width = 9.0  # 左边区域宽度(米)
         middle_region_width = 1.0  # 中间区域宽度(米)
-        right_region_width = 8.0  # 右边区域宽度(米)
+        right_region_width = 9.0  # 右边区域宽度(米)
         
         # 转换为网格单位
         left_region_width_grid = round(left_region_width / terrain.horizontal_scale)
@@ -731,26 +731,22 @@ class single_terrain:
         left_mid_y = left_y_start + left_region_width_grid // 2  # 左边区域的中心Y坐标
         left_mid_x = start_x + length_x_grid // 2  # 左边区域的中心X坐标
         
-        # 设置起始平台（在左边区域的中心，机器人出生点附近）
-        platform_x_start = left_mid_x - init_platform_grid // 2
-        platform_x_end = left_mid_x + init_platform_grid // 2
+        # 设置起始平台（居中于左侧区域）
+        platform_x_start = max(start_x, left_mid_x - init_platform_grid // 2)
+        platform_x_end = min(start_x + length_x_grid, platform_x_start + init_platform_grid)
         terrain.height_field_raw[platform_x_start:platform_x_end, 
                                 left_y_start:left_y_end] = 0
+
+        # 保存左侧区域中心（用于env origin）
+        terrain.left_region_center_x = left_mid_x * terrain.horizontal_scale
+        terrain.left_region_center_y = left_mid_y * terrain.horizontal_scale
         
         # 计算目标点位置（都在左边区域的中心线上，只在左边区域内）
-        # 目标点在X方向分布，从起始平台后开始，到左边区域结束
         left_region_x_end = start_x + length_x_grid  # 左边区域的X方向结束位置
         available_x_length = left_region_x_end - platform_x_end  # 可用的X方向长度
         per_x = available_x_length // num_goals
         for i in range(num_goals):
             goals[i] = [platform_x_end + per_x * i, left_mid_y]
-            
-        # 保存左边区域的中心Y坐标（用于环境原点定位）
-        terrain.left_region_center_y = left_mid_y * terrain.horizontal_scale
-        
-        # 保存左边区域的中心X坐标（用于环境原点定位）
-        left_mid_x = start_x + length_x_grid // 2  # 左边区域的中心X坐标
-        terrain.left_region_center_x = left_mid_x * terrain.horizontal_scale
         
         # === 中间区域：平地缓冲区 ===
         middle_y_start = left_y_end
@@ -769,55 +765,88 @@ class single_terrain:
         terrain.height_field_raw[start_x:start_x + length_x_grid,
                                 right_y_start:right_y_end] = -gap_depth_grid
         
-        # === Stones Everywhere 参数（来自论文BeamDojo） ===
-        difficulty_level = min(8, int(difficulty * 8))  # 难度等级 l ∈ [0, 8]
+        # === Stones Everywhere 间隙与石块尺寸 ===
+        difficulty_clamped = np.clip(difficulty, 0.0, 1.0)
+        if difficulty_clamped <= 1e-6:
+            # 课程首级保持平地，无石块
+            terrain.height_field_raw[start_x:start_x + length_x_grid,
+                                    right_y_start:right_y_end] = 0
+            return terrain, goals, start_x + length_x_grid
+
+        min_gap_m = 0.02
+        max_gap_m = 0.4
+        stone_distance = min_gap_m + (max_gap_m - min_gap_m) * difficulty_clamped
+        stone_distance_grid = max(1, round(stone_distance / terrain.horizontal_scale))
+        stone_size_grid = max(1, round(platform_size / terrain.horizontal_scale))
         
-        # 石块尺寸：max{0.25, 1.5(1 - 0.1l)}
-        stone_size = max(0.25, 1.5 * (1.0 - 0.1 * difficulty_level))
-        stone_size_grid = round(stone_size / terrain.horizontal_scale)
+        # 计算中心小平地的位置（也作为扩展起点）
+        small_platform_x_start = start_x + length_x_grid // 2 - stone_size_grid // 2
+        small_platform_x_end = small_platform_x_start + stone_size_grid
+        small_platform_y_start = right_y_start + (right_y_end - right_y_start) // 2 - stone_size_grid // 2
+        small_platform_y_end = small_platform_y_start + stone_size_grid
         
-        # 石块间距：0.05 × ⌈l/2⌉
-        stone_distance = 0.05 * np.ceil(difficulty_level / 2.0)
-        stone_distance_grid = round(stone_distance / terrain.horizontal_scale)
+        small_platform_x_start = max(start_x, min(small_platform_x_start, start_x + length_x_grid - stone_size_grid))
+        small_platform_x_end = small_platform_x_start + stone_size_grid
+        small_platform_y_start = max(right_y_start, min(small_platform_y_start, right_y_end - stone_size_grid))
+        small_platform_y_end = small_platform_y_start + stone_size_grid
         
-        # 子网格尺寸 = 石块尺寸 + 间距
-        subgrid_size = stone_size_grid + stone_distance_grid
+        # 从中心向外按环扩展石块，保持“先间隙后石块”的节奏
+        def generate_ring_positions(center_x, center_y, axis_x_start, axis_x_end, axis_y_start, axis_y_end):
+            positions = []
+            seen = set()
+            stride = stone_size_grid + stone_distance_grid
+            layer = 1
+            max_layers = max(
+                math.ceil((axis_x_end - axis_x_start) / max(1, stride)),
+                math.ceil((axis_y_end - axis_y_start) / max(1, stride)),
+            ) + 2
+            
+            while layer <= max_layers:
+                added = False
+                for dx in range(-layer, layer + 1):
+                    for dy in range(-layer, layer + 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        if max(abs(dx), abs(dy)) != layer:
+                            continue
+                        block_x = center_x + dx * stride
+                        block_y = center_y + dy * stride
+                        
+                        # 若剩余空间不足以摆下完整石块，则保留为空隙
+                        if block_x < axis_x_start or block_y < axis_y_start:
+                            continue
+                        if block_x + stone_size_grid > axis_x_end or block_y + stone_size_grid > axis_y_end:
+                            continue
+                        
+                        key = (int(block_x), int(block_y))
+                        if key in seen:
+                            continue
+                        positions.append(key)
+                        seen.add(key)
+                        added = True
+                if not added:
+                    break
+                layer += 1
+            return positions
         
-        # 在右边区域放置石块"岛屿"
-        current_x = start_x
-        while current_x < start_x + length_x_grid:
-            current_y = right_y_start
-            while current_y < right_y_end:
-                # 计算实际可以放置的石块尺寸（避免越界）
-                actual_stone_x = min(stone_size_grid, start_x + length_x_grid - current_x)
-                actual_stone_y = min(stone_size_grid, right_y_end - current_y)
-                
-                # 只有当石块足够大时才创建（至少要有原尺寸的30%）
-                if actual_stone_x >= stone_size_grid * 0.3 and actual_stone_y >= stone_size_grid * 0.3:
-                    # 创建石块平台（高度=0）
-                    terrain.height_field_raw[current_x:current_x + actual_stone_x,
-                                            current_y:current_y + actual_stone_y] = 0
-                current_y += subgrid_size
-            current_x += subgrid_size
+        ring_positions = generate_ring_positions(
+            small_platform_x_start,
+            small_platform_y_start,
+            start_x,
+            start_x + length_x_grid,
+            right_y_start,
+            right_y_end
+        )
+        
+        # 在右边区域放置按环扩展的石块
+        for current_x, current_y in ring_positions:
+            actual_stone_x = min(stone_size_grid, start_x + length_x_grid - current_x)
+            actual_stone_y = min(stone_size_grid, right_y_end - current_y)
+            if actual_stone_x >= stone_size_grid * 0.1 and actual_stone_y >= stone_size_grid * 0.1:
+                terrain.height_field_raw[current_x:current_x + actual_stone_x,
+                                        current_y:current_y + actual_stone_y] = 0
         
         # === 右边区域中心小平地 ===
-        # 在右边区域的中心创建一个小平地
-        right_center_y = right_y_start + (right_y_end - right_y_start) // 2
-        small_platform_size = round(platform_size / terrain.horizontal_scale)  # 0.5米的小平地
-        
-        # 小平地位置：右边区域的中心
-        small_platform_y_start = right_center_y - small_platform_size // 2
-        small_platform_y_end = right_center_y + small_platform_size // 2
-        small_platform_x_start = start_x + length_x_grid // 2 - small_platform_size // 2
-        small_platform_x_end = start_x + length_x_grid // 2 + small_platform_size // 2
-        
-        # 确保小平地在右边区域范围内
-        small_platform_y_start = max(small_platform_y_start, right_y_start)
-        small_platform_y_end = min(small_platform_y_end, right_y_end)
-        small_platform_x_start = max(small_platform_x_start, start_x)
-        small_platform_x_end = min(small_platform_x_end, start_x + length_x_grid)
-        
-        # 创建小平地（高度=0）
         terrain.height_field_raw[small_platform_x_start:small_platform_x_end,
                                 small_platform_y_start:small_platform_y_end] = 0
         
