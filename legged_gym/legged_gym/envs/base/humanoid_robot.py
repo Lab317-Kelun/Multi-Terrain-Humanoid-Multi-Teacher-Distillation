@@ -1057,7 +1057,7 @@ class HumanoidRobot(BaseTask):
             
             elif curriculum_cfg.success_mode == 'vel_tracking':
                 # 速度模式：判断是否达到指定速度
-                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.7 * self.reward_scales["tracking_x_vel"])
+                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
                 success_threshold = curriculum_cfg.velocity_success_threshold
                 failure_threshold = curriculum_cfg.velocity_failure_threshold
             
@@ -2019,11 +2019,6 @@ class HumanoidRobot(BaseTask):
         height_error = torch.abs(base_height - self.cfg.rewards.base_height_target + self.cfg.asset.ankle_sole_distance)
         return torch.exp(-height_error / self.cfg.rewards.tracking_sigma)
 
-    # def _reward_base_height(self):
-    #     # Penalize base height away from target
-    #     base_height = torch.mean(self.root_states[:, 2].unsqueeze(1))
-    #     return torch.square(base_height - self.cfg.rewards.base_height_target)
-
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
         return torch.square(self.base_lin_vel[:, 2])
@@ -2039,13 +2034,6 @@ class HumanoidRobot(BaseTask):
     def _reward_action_rate(self):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
-    
-    # def _reward_tracking_base_height(self):
-    #     base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
-    #     base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
-    #     base_height = torch.max(base_height_l, base_height_r)
-    #     height_error = torch.abs(base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance)
-    #     return torch.exp(-height_error * 4)
     
     def _reward_deviation_hip_joint(self):
         return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1)

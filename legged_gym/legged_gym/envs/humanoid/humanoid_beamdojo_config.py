@@ -74,7 +74,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     # 课程学习配置
     class curriculum_config:
         # === 课程学习成功判定模式 ===
-        success_mode = 'survival_time'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
+        success_mode = 'vel_tracking'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
         
         # === 成功率计算模式 (用于日志记录) ===
         success_rate_mode = 'survival_time'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
