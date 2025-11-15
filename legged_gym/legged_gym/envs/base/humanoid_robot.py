@@ -628,7 +628,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        # print(f"self.commands[:, 0:5]: {self.commands[:, 0:5]}")
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -897,8 +897,8 @@ class HumanoidRobot(BaseTask):
     
     def _resample_commands(self, env_ids):
         set_x = torch.rand(len(env_ids), 1).to(self.device)
-        is_height = set_x < 1/3
         is_vel = set_x > 1/2
+        is_height = set_x < 1/3
         if self.cfg.commands.height_adaptive_speed:
             adaptive_speeds = self._generate_adaptive_speed(env_ids)
             self.commands[env_ids, 0] = adaptive_speeds
@@ -1069,7 +1069,7 @@ class HumanoidRobot(BaseTask):
             
             elif curriculum_cfg.success_mode == 'vel_tracking':
                 # 速度模式：判断是否达到指定速度
-                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
+                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.7 * self.reward_scales["tracking_x_vel"])
                 success_threshold = curriculum_cfg.velocity_success_threshold
                 failure_threshold = curriculum_cfg.velocity_failure_threshold
             
@@ -1652,9 +1652,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 10
+            y_start = - num_y / 2 * spacing
             x_end = -x_start + 0.08
-            y_end = -y_start + 20
+            y_end = -y_start
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
             y_samples = torch.linspace(y_start, y_end, num_y, device=self.device)
@@ -2216,9 +2216,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 10
+            y_start = - num_y / 2 * spacing
             x_end = -x_start + 0.08
-            y_end = -y_start + 20
+            y_end = -y_start
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)

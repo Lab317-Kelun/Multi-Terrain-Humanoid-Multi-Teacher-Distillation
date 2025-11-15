@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 4 #与课程学习有关 
+        episode_length_s = 20 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -84,7 +84,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 4  # 存活时间阈值（秒）
+        survival_time_threshold = 20  # 存活时间阈值（秒）
         survival_success_threshold = 2  # 连续存活成功次数阈值
         survival_failure_threshold = 3   # 连续存活失败次数阈值
         
@@ -246,10 +246,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.8, 1.2] # min max [m/s]
-            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+            lin_vel_x = [-0.8, 1.2] # min max [m/s]
+            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
-            heading = [-0.0, 0.0]
+            heading = [-1.0, 1.0]
             height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
