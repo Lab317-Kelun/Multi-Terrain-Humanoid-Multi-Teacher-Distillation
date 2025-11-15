@@ -173,8 +173,9 @@ class single_terrain:
         length_y = round(length_y / terrain.horizontal_scale)
         platform_size = round(platform_size / terrain.horizontal_scale)
 
+        terrain.left_region_center_x = length_x / 2 * terrain.horizontal_scale
+        terrain.left_region_center_y = length_y / 2 * terrain.horizontal_scale
         for i in range(num_goals):
-            # y_pos = round(random.uniform(0,length_y))
             y_pos = length_y//2
             goals[i]=[start_x+platform_size+length_x/num_goals*i,start_y+y_pos]
 

@@ -383,10 +383,8 @@ class HumanoidRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        length = (self.cfg.terrain.terrain_length / 2) - 1.2
-        width = (self.cfg.terrain.terrain_width - 1) / 2 - 1.2
-        # length = self.cfg.terrain.terrain_length- 0.2
-        # width = self.cfg.terrain.terrain_width - 0.2
+        length = self.cfg.terrain.terrain_length- 0.1
+        width = self.cfg.terrain.terrain_width - 0.1
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
@@ -1057,7 +1055,7 @@ class HumanoidRobot(BaseTask):
             
             elif curriculum_cfg.success_mode == 'vel_tracking':
                 # 速度模式：判断是否达到指定速度
-                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
+                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.7 * self.reward_scales["tracking_x_vel"])
                 success_threshold = curriculum_cfg.velocity_success_threshold
                 failure_threshold = curriculum_cfg.velocity_failure_threshold
             
@@ -1640,9 +1638,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 10
+            y_start = - num_y / 2 * spacing
             x_end = -x_start + 0.08
-            y_end = -y_start + 20
+            y_end = -y_start
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
             y_samples = torch.linspace(y_start, y_end, num_y, device=self.device)
@@ -2207,9 +2205,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 10
+            y_start = - num_y / 2 * spacing
             x_end = -x_start + 0.08
-            y_end = -y_start + 20
+            y_end = -y_start
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)

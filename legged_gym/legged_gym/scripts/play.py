@@ -65,7 +65,7 @@ def play(args):
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.max_init_terrain_level = 0
 
-    env_cfg.terrain.height = [0.00, 0.04]
+    env_cfg.terrain.height = [0.00, 0.06]
     
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
