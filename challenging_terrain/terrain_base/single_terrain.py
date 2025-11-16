@@ -177,7 +177,7 @@ class single_terrain:
         terrain.left_region_center_y = length_y / 2 * terrain.horizontal_scale
         for i in range(num_goals):
             y_pos = length_y//2
-            goals[i]=[start_x+platform_size+length_x/num_goals*i,start_y+y_pos]
+            goals[i]=[start_x+platform_size+(length_x/2)/num_goals*i,start_y+y_pos]
 
         return terrain,goals,length_x
 

@@ -383,8 +383,8 @@ class HumanoidRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        length = self.cfg.terrain.terrain_length- 0.1
-        width = self.cfg.terrain.terrain_width - 0.1
+        length = self.cfg.terrain.terrain_length- 0.2
+        width = self.cfg.terrain.terrain_width - 0.2
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
@@ -661,8 +661,11 @@ class HumanoidRobot(BaseTask):
         ), dim=-1)
         
         if self.cfg.terrain.measure_heights:
-            heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
+            # heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
+            heights = self.root_states[:, 2].unsqueeze(1) - self.measured_heights
             self.obs_buf = torch.cat([obs_buf, heights, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+            # print(f"root_z: {self.root_states[0, 2].item():.4f}")
+            # print(f"torso_z: {self.rigid_body_states[0, self.torso_body_index, 2].item():.4f}")
         else:
             self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
 

@@ -30,7 +30,7 @@
 
 import numpy as np
 
-import code
+from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
@@ -85,6 +85,44 @@ class StateHistoryEncoder(nn.Module):
         output = self.linear_output(output)
         return output
 
+
+class CNNScanEncoder(nn.Module):
+    def __init__(self, channels, kernel_sizes, strides, activation_fn, output_dim):
+        super().__init__()
+        if channels is None or len(channels) == 0:
+            raise ValueError("channels must be a non-empty list for CNNScanEncoder")
+        if kernel_sizes is None:
+            kernel_sizes = [3] * len(channels)
+        if strides is None:
+            strides = [1] * len(channels)
+        if not (len(channels) == len(kernel_sizes) == len(strides)):
+            raise ValueError("channels, kernel_sizes and strides must have the same length")
+
+        conv_layers = []
+        in_channels = 1
+        for out_channels, kernel_size, stride in zip(channels, kernel_sizes, strides):
+            padding = max((kernel_size - 1) // 2, 0)
+            conv_layers.append(nn.Conv1d(in_channels=in_channels,
+                                         out_channels=out_channels,
+                                         kernel_size=kernel_size,
+                                         stride=stride,
+                                         padding=padding))
+            conv_layers.append(deepcopy(activation_fn))
+            in_channels = out_channels
+        conv_layers.append(nn.AdaptiveAvgPool1d(1))
+        self.conv = nn.Sequential(*conv_layers)
+
+        projection_layers = [nn.Flatten(),
+                             nn.Linear(in_channels, output_dim),
+                             nn.Tanh()]
+        self.projection = nn.Sequential(*projection_layers)
+
+    def forward(self, scan):
+        x = scan.unsqueeze(1)
+        x = self.conv(x)
+        x = self.projection(x)
+        return x
+
 class Actor(nn.Module):
     def __init__(self, num_prop, 
                  num_scan, 
@@ -95,6 +133,12 @@ class Actor(nn.Module):
                  num_priv_latent, 
                  num_priv_explicit, 
                  num_hist, activation, 
+                 scan_encoder_type='mlp',
+                 scan_cnn_channels=None,
+                 scan_cnn_kernel_sizes=None,
+                 scan_cnn_strides=None,
+                 scan_cnn_output_dim=None,
+                 scan_encoder_debug=False,
                  tanh_encoder_output=False) -> None:
         super().__init__()
         # prop -> scan -> priv_explicit -> priv_latent -> hist
@@ -105,7 +149,9 @@ class Actor(nn.Module):
         self.num_actions = num_actions
         self.num_priv_latent = num_priv_latent
         self.num_priv_explicit = num_priv_explicit
-        self.if_scan_encode = scan_encoder_dims is not None and num_scan > 0
+        self.scan_encoder_type = (scan_encoder_type or 'mlp').lower()
+        self.scan_encoder_debug = scan_encoder_debug
+        self.if_scan_encode = num_scan > 0 and self.scan_encoder_type != 'none'
 
         if len(priv_encoder_dims) > 0:
                     priv_encoder_layers = []
@@ -123,22 +169,46 @@ class Actor(nn.Module):
         self.history_encoder = StateHistoryEncoder(activation, num_prop, num_hist, priv_encoder_output_dim)
 
         if self.if_scan_encode:
-            scan_encoder = []
-            scan_encoder.append(nn.Linear(num_scan, scan_encoder_dims[0]))
-            scan_encoder.append(activation)
-            for l in range(len(scan_encoder_dims) - 1):
-                if l == len(scan_encoder_dims) - 2:
-                    scan_encoder.append(nn.Linear(scan_encoder_dims[l], scan_encoder_dims[l+1]))
-                    scan_encoder.append(nn.Tanh())
-                else:
-                    scan_encoder.append(nn.Linear(scan_encoder_dims[l], scan_encoder_dims[l + 1]))
-                    scan_encoder.append(activation)
-            self.scan_encoder = nn.Sequential(*scan_encoder)
-            self.scan_encoder_output_dim = scan_encoder_dims[-1]
+            if self.scan_encoder_type == 'cnn':
+                if scan_cnn_channels is None or len(scan_cnn_channels) == 0:
+                    raise ValueError("scan_cnn_channels must be provided when scan_encoder_type is 'cnn'")
+                if scan_cnn_output_dim is None:
+                    scan_cnn_output_dim = scan_cnn_channels[-1]
+                if scan_cnn_kernel_sizes is None:
+                    scan_cnn_kernel_sizes = [3] * len(scan_cnn_channels)
+                if scan_cnn_strides is None:
+                    scan_cnn_strides = [1] * len(scan_cnn_channels)
+                self.scan_encoder = CNNScanEncoder(
+                    scan_cnn_channels,
+                    scan_cnn_kernel_sizes,
+                    scan_cnn_strides,
+                    activation,
+                    scan_cnn_output_dim
+                )
+                self.scan_encoder_output_dim = scan_cnn_output_dim
+            elif self.scan_encoder_type == 'mlp':
+                if scan_encoder_dims is None or len(scan_encoder_dims) == 0:
+                    raise ValueError("scan_encoder_dims must be provided when scan_encoder_type is 'mlp'")
+                scan_encoder = []
+                scan_encoder.append(nn.Linear(num_scan, scan_encoder_dims[0]))
+                scan_encoder.append(activation)
+                for l in range(len(scan_encoder_dims) - 1):
+                    if l == len(scan_encoder_dims) - 2:
+                        scan_encoder.append(nn.Linear(scan_encoder_dims[l], scan_encoder_dims[l+1]))
+                        scan_encoder.append(nn.Tanh())
+                    else:
+                        scan_encoder.append(nn.Linear(scan_encoder_dims[l], scan_encoder_dims[l + 1]))
+                        scan_encoder.append(activation)
+                self.scan_encoder = nn.Sequential(*scan_encoder)
+                self.scan_encoder_output_dim = scan_encoder_dims[-1]
+            else:
+                raise ValueError(f"Unsupported scan_encoder_type: {self.scan_encoder_type}")
         else:
             self.scan_encoder = nn.Identity()
             self.scan_encoder_output_dim = num_scan
         
+        self.actor_input_dim = num_prop + self.scan_encoder_output_dim + num_priv_explicit + priv_encoder_output_dim
+
         actor_layers = []
         actor_layers.append(nn.Linear(num_prop+
                                       self.scan_encoder_output_dim+
@@ -155,6 +225,9 @@ class Actor(nn.Module):
         if tanh_encoder_output:
             actor_layers.append(nn.Tanh())
         self.actor_backbone = nn.Sequential(*actor_layers)
+
+        if self.scan_encoder_debug:
+            self._log_scan_encoder_info(scan_encoder_dims, scan_cnn_channels, scan_cnn_kernel_sizes, scan_cnn_strides, num_actions)
 
     def forward(self, obs, hist_encoding: bool, eval=False, scandots_latent=None):
         if not eval:
@@ -206,6 +279,24 @@ class Actor(nn.Module):
         scan = obs[:, self.num_prop:self.num_prop + self.num_scan]
         return self.scan_encoder(scan)
 
+    def _log_scan_encoder_info(self, scan_encoder_dims, scan_cnn_channels, scan_cnn_kernel_sizes, scan_cnn_strides, num_actions):
+        print("[ScanEncoderDebug] ===== Scan Encoder Summary =====")
+        print(f"[ScanEncoderDebug] Type: {self.scan_encoder_type.upper()} | Num scan inputs: {self.num_scan}")
+        if self.if_scan_encode:
+            if self.scan_encoder_type == 'cnn':
+                print(f"[ScanEncoderDebug] CNN channels: {scan_cnn_channels}, kernel_sizes: {scan_cnn_kernel_sizes}, strides: {scan_cnn_strides}")
+            else:
+                print(f"[ScanEncoderDebug] MLP hidden dims: {scan_encoder_dims}")
+            print(f"[ScanEncoderDebug] Latent dim: {self.scan_encoder_output_dim}")
+            with torch.no_grad():
+                dummy = torch.zeros(1, self.num_scan)
+                latent = self.scan_encoder(dummy)
+                print(f"[ScanEncoderDebug] Dummy forward output shape: {list(latent.shape)}")
+        else:
+            print("[ScanEncoderDebug] Scan encoder disabled (passing raw scan).")
+        print(f"[ScanEncoderDebug] Actor input dim: {self.actor_input_dim}, num_actions: {num_actions}")
+        print("[ScanEncoderDebug] ==================================")
+
 class ActorCriticRMA(nn.Module):
     is_recurrent = False
     def __init__(self,  num_prop,
@@ -221,15 +312,51 @@ class ActorCriticRMA(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         **kwargs):
-        if kwargs:
-            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        supported_kwargs = {
+            'priv_encoder_dims',
+            'tanh_encoder_output',
+            'scan_encoder_type',
+            'scan_cnn_channels',
+            'scan_cnn_kernel_sizes',
+            'scan_cnn_strides',
+            'scan_cnn_output_dim',
+            'scan_encoder_debug',
+        }
+        unexpected = [key for key in kwargs.keys() if key not in supported_kwargs]
+        if unexpected:
+            print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str(unexpected))
         super(ActorCriticRMA, self).__init__()
 
         self.kwargs = kwargs
-        priv_encoder_dims= kwargs['priv_encoder_dims']
+        priv_encoder_dims= kwargs.get('priv_encoder_dims', [])
+        tanh_encoder_output = kwargs.get('tanh_encoder_output', False)
+        scan_encoder_type = kwargs.get('scan_encoder_type', 'mlp')
+        scan_cnn_channels = kwargs.get('scan_cnn_channels')
+        scan_cnn_kernel_sizes = kwargs.get('scan_cnn_kernel_sizes')
+        scan_cnn_strides = kwargs.get('scan_cnn_strides')
+        scan_cnn_output_dim = kwargs.get('scan_cnn_output_dim')
+        scan_encoder_debug = kwargs.get('scan_encoder_debug', False)
         activation = get_activation(activation)
         
-        self.actor = Actor(num_prop, num_scan, num_actions, scan_encoder_dims, actor_hidden_dims, priv_encoder_dims, num_priv_latent, num_priv_explicit, num_hist, activation, tanh_encoder_output=kwargs['tanh_encoder_output'])
+        self.actor = Actor(
+            num_prop,
+            num_scan,
+            num_actions,
+            scan_encoder_dims,
+            actor_hidden_dims,
+            priv_encoder_dims,
+            num_priv_latent,
+            num_priv_explicit,
+            num_hist,
+            activation,
+            scan_encoder_type=scan_encoder_type,
+            scan_cnn_channels=scan_cnn_channels,
+            scan_cnn_kernel_sizes=scan_cnn_kernel_sizes,
+            scan_cnn_strides=scan_cnn_strides,
+            scan_cnn_output_dim=scan_cnn_output_dim,
+            scan_encoder_debug=scan_encoder_debug,
+            tanh_encoder_output=tanh_encoder_output,
+        )
         
 
         # Value function
@@ -325,20 +452,53 @@ class ActorCriticRMADoubleReward(nn.Module):
                         init_noise_std=1.0,
                         use_double_critic=False,
                         **kwargs):
-        if kwargs:
-            print("ActorCriticRMADoubleReward.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        supported_kwargs = {
+            'priv_encoder_dims',
+            'tanh_encoder_output',
+            'scan_encoder_type',
+            'scan_cnn_channels',
+            'scan_cnn_kernel_sizes',
+            'scan_cnn_strides',
+            'scan_cnn_output_dim',
+            'scan_encoder_debug',
+        }
+        unexpected = [key for key in kwargs.keys() if key not in supported_kwargs]
+        if unexpected:
+            print("ActorCriticRMADoubleReward.__init__ got unexpected arguments, which will be ignored: " + str(unexpected))
         super(ActorCriticRMADoubleReward, self).__init__()
 
         self.kwargs = kwargs
         self.use_double_critic = use_double_critic
-        priv_encoder_dims= kwargs['priv_encoder_dims']
+        priv_encoder_dims= kwargs.get('priv_encoder_dims', [])
+        tanh_encoder_output = kwargs.get('tanh_encoder_output', False)
+        scan_encoder_type = kwargs.get('scan_encoder_type', 'mlp')
+        scan_cnn_channels = kwargs.get('scan_cnn_channels')
+        scan_cnn_kernel_sizes = kwargs.get('scan_cnn_kernel_sizes')
+        scan_cnn_strides = kwargs.get('scan_cnn_strides')
+        scan_cnn_output_dim = kwargs.get('scan_cnn_output_dim')
+        scan_encoder_debug = kwargs.get('scan_encoder_debug', False)
         activation = get_activation(activation)
         
         # Actor网络（与原版保持一致）
-        self.actor = Actor(num_prop, num_scan, num_actions, scan_encoder_dims, 
-                          actor_hidden_dims, priv_encoder_dims, num_priv_latent, 
-                          num_priv_explicit, num_hist, activation, 
-                          tanh_encoder_output=kwargs['tanh_encoder_output'])
+        self.actor = Actor(
+            num_prop,
+            num_scan,
+            num_actions,
+            scan_encoder_dims,
+            actor_hidden_dims,
+            priv_encoder_dims,
+            num_priv_latent,
+            num_priv_explicit,
+            num_hist,
+            activation,
+            scan_encoder_type=scan_encoder_type,
+            scan_cnn_channels=scan_cnn_channels,
+            scan_cnn_kernel_sizes=scan_cnn_kernel_sizes,
+            scan_cnn_strides=scan_cnn_strides,
+            scan_cnn_output_dim=scan_cnn_output_dim,
+            scan_encoder_debug=scan_encoder_debug,
+            tanh_encoder_output=tanh_encoder_output,
+        )
         
         # Critic网络
         if use_double_critic:

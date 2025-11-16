@@ -245,7 +245,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [-0.8, 1.2] # min max [m/s]
+            lin_vel_x = [-0.8, 1.0] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
             heading = [-1.0, 1.0]
@@ -392,8 +392,14 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         critic_hidden_dims = [1024, 512, 256, 128]
         activation = 'elu'
         
-        # 扫描编码器配置
-        scan_encoder_dims = [128, 64, 32]
+        # 扫描编码器配置（可在MLP/CNN间切换）
+        scan_encoder_type = 'mlp'  # 取值: 'mlp' 或 'cnn'
+        scan_encoder_dims = [128, 64, 32]  # 仅当 type='mlp' 时有效
+        scan_cnn_channels = [128, 96, 64]
+        scan_cnn_kernel_sizes = [7, 5, 3]
+        scan_cnn_strides = [2, 2, 1]
+        scan_encoder_debug = True
+        
         priv_encoder_dims = [64, 20]
         tanh_encoder_output = False  # 编码器输出是否使用tanh激活
         

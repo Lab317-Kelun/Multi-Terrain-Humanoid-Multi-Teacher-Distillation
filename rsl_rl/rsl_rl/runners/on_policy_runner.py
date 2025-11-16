@@ -93,10 +93,29 @@ class OnPolicyRunner:
         #estimator = Estimator(input_dim=env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv, hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
         estimator = Estimator(input_dim=env.cfg.env.history_len * env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv, hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
         # Depth encoder
+        scan_encoder_type = self.policy_cfg.get("scan_encoder_type", "mlp").lower()
+        if scan_encoder_type == "cnn":
+            scan_cnn_channels = self.policy_cfg.get("scan_cnn_channels") or []
+            scan_encoder_output_dim = scan_cnn_channels[-1] if scan_cnn_channels else self.env.cfg.env.n_scan
+        elif scan_encoder_type == "mlp":
+            scan_dims = self.policy_cfg.get("scan_encoder_dims") or []
+            scan_encoder_output_dim = scan_dims[-1] if scan_dims else self.env.cfg.env.n_scan
+        else:
+            scan_encoder_output_dim = self.env.cfg.env.n_scan
+
+        if self.policy_cfg.get("scan_encoder_debug", False):
+            print("[ScanEncoderDebug] Runner summary -> "
+                  f"type: {scan_encoder_type.upper()}, "
+                  f"num_prop: {self.env.cfg.env.n_proprio}, "
+                  f"num_scan: {self.env.cfg.env.n_scan}, "
+                  f"latent_dim: {scan_encoder_output_dim}, "
+                  f"critic_obs_dim: {self.env.num_obs}, "
+                  f"num_actions: {self.env.num_actions}")
+
         self.if_depth = self.depth_encoder_cfg["if_depth"]
         if self.if_depth:
             depth_backbone = DepthOnlyFCBackbone58x87(env.cfg.env.n_proprio, 
-                                                    self.policy_cfg["scan_encoder_dims"][-1], 
+                                                    scan_encoder_output_dim, 
                                                     self.depth_encoder_cfg["hidden_dims"],
                                                     )
             depth_encoder = RecurrentDepthBackbone(depth_backbone, env.cfg).to(self.device)
