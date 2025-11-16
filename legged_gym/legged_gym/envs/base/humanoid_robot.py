@@ -1058,7 +1058,7 @@ class HumanoidRobot(BaseTask):
             
             elif curriculum_cfg.success_mode == 'vel_tracking':
                 # 速度模式：判断是否达到指定速度
-                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.7 * self.reward_scales["tracking_x_vel"])
+                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
                 success_threshold = curriculum_cfg.velocity_success_threshold
                 failure_threshold = curriculum_cfg.velocity_failure_threshold
             

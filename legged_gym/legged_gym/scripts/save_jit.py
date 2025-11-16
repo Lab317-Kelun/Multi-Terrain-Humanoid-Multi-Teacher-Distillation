@@ -71,7 +71,7 @@ def play(args):
 
     n_priv_explicit = 3 + 3 + 3
     n_priv_latent = 4 + 1 + 12 +12
-    num_scan = 132
+    num_scan = 225
     num_actions = 12
     
     # depth_buffer_len = 2
