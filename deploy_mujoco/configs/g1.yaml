@@ -1,6 +1,5 @@
-# ========== 路径配置 ==========
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/deploy_mujoco/models/model.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/deploy_mujoco/models/model_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 
