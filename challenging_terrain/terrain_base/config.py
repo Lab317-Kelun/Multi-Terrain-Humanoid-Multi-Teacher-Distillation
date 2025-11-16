@@ -16,7 +16,7 @@ class terrain_config:
         border_size = 2                 # 地形边界大小，单位：米
         
         # === 地形特征参数 === 
-        height = [0.00, 0.06]          # 随机粗糙度的高度范围 [最小, 最大]，单位：米
+        height = [0.00, 0.02]          # 随机粗糙度的高度范围 [最小, 最大]，单位：米
         simplify_grid = False           # 是否简化网格（减少三角形数量）
         downsampled_scale = 0.075       # 下采样比例
         curriculum = True               # 是否启用课程学习（难度递增）

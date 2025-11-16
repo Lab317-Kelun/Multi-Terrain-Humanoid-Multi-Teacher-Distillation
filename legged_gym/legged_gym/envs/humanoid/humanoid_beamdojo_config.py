@@ -85,8 +85,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
          
         # 存活时间模式参数
         survival_time_threshold = 20  # 存活时间阈值（秒）
-        survival_success_threshold = 2  # 连续存活成功次数阈值
-        survival_failure_threshold = 3   # 连续存活失败次数阈值
+        survival_success_threshold = 3  # 连续存活成功次数阈值
+        survival_failure_threshold = 2   # 连续存活失败次数阈值
         
         # 速度模式参数
         velocity_success_threshold = 3  # 连续速度成功次数阈值
@@ -246,7 +246,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [-0.8, 1.2] # min max [m/s]
+            lin_vel_x = [-0.8, 1.0] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
             heading = [-1.0, 1.0]
