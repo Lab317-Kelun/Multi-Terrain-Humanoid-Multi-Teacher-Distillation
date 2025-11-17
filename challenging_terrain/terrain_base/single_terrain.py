@@ -710,9 +710,9 @@ class single_terrain:
         middle_gap_grid = round(middle_gap_width / terrain.horizontal_scale)
         
         # Y方向分成三个区域：左边8米 + 中间1米 + 右边8米
-        left_region_width = 9.0  # 左边区域宽度(米)
+        left_region_width = 20.0  # 左边区域宽度(米)
         middle_region_width = 1.0  # 中间区域宽度(米)
-        right_region_width = 9.0  # 右边区域宽度(米)
+        right_region_width = 20.0  # 右边区域宽度(米)
         
         # 转换为网格单位
         left_region_width_grid = round(left_region_width / terrain.horizontal_scale)
@@ -767,11 +767,11 @@ class single_terrain:
         
         # === Stones Everywhere 间隙与石块尺寸 ===
         difficulty_clamped = np.clip(difficulty, 0.0, 1.0)
-        if difficulty_clamped <= 1e-6:
-            # 课程首级保持平地，无石块
-            terrain.height_field_raw[start_x:start_x + length_x_grid,
-                                    right_y_start:right_y_end] = 0
-            return terrain, goals, start_x + length_x_grid
+        # if difficulty_clamped <= 1e-6:
+        #     # 课程首级保持平地，无石块
+        #     terrain.height_field_raw[start_x:start_x + length_x_grid,
+        #                             right_y_start:right_y_end] = 0
+        #     return terrain, goals, start_x + length_x_grid
 
         min_gap_m = 0.02
         max_gap_m = 0.4
@@ -790,7 +790,11 @@ class single_terrain:
         small_platform_y_start = max(right_y_start, min(small_platform_y_start, right_y_end - stone_size_grid))
         small_platform_y_end = small_platform_y_start + stone_size_grid
         
-        # 从中心向外按环扩展石块，保持“先间隙后石块”的节奏
+        # 计算中心小平地的中心点（作为扩展起点，保持对齐）
+        center_platform_x = small_platform_x_start + stone_size_grid // 2
+        center_platform_y = small_platform_y_start + stone_size_grid // 2
+        
+        # 从中心向外按环扩展石块，保持"先间隙后石块"的节奏
         def generate_ring_positions(center_x, center_y, axis_x_start, axis_x_end, axis_y_start, axis_y_end):
             positions = []
             seen = set()
@@ -809,13 +813,14 @@ class single_terrain:
                             continue
                         if max(abs(dx), abs(dy)) != layer:
                             continue
-                        block_x = center_x + dx * stride
-                        block_y = center_y + dy * stride
+                        # 从中心点计算石块位置（石块左上角），保持对齐
+                        block_x = center_x + dx * stride - stone_size_grid // 2
+                        block_y = center_y + dy * stride - stone_size_grid // 2
                         
-                        # 若剩余空间不足以摆下完整石块，则保留为空隙
+                        # 允许边界位置，只要起始位置在区域内（即使放不下完整石块也会尽量放置）
                         if block_x < axis_x_start or block_y < axis_y_start:
                             continue
-                        if block_x + stone_size_grid > axis_x_end or block_y + stone_size_grid > axis_y_end:
+                        if block_x >= axis_x_end or block_y >= axis_y_end:
                             continue
                         
                         key = (int(block_x), int(block_y))
@@ -830,21 +835,129 @@ class single_terrain:
             return positions
         
         ring_positions = generate_ring_positions(
-            small_platform_x_start,
-            small_platform_y_start,
+            center_platform_x,
+            center_platform_y,
             start_x,
             start_x + length_x_grid,
             right_y_start,
             right_y_end
         )
         
+        # 额外添加边界位置，确保四个边界都被填满
+        # 使用set去重，避免重复位置
+        boundary_positions = set(ring_positions)
+        stride = stone_size_grid + stone_distance_grid
+        
+        # 显式添加中心小平地周围的第一层环位置，确保8个方向都被覆盖且对齐
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue  # 跳过中心位置
+                # 从中心点计算石块位置（石块左上角），保持对齐
+                block_x = center_platform_x + dx * stride - stone_size_grid // 2
+                block_y = center_platform_y + dy * stride - stone_size_grid // 2
+                
+                # 确保位置在区域内
+                if (block_x >= start_x and block_x < start_x + length_x_grid and
+                    block_y >= right_y_start and block_y < right_y_end):
+                    boundary_positions.add((block_x, block_y))
+        
+        # 左边界（X = start_x）
+        for y in range(right_y_start, right_y_end, max(1, stone_distance_grid)):
+            boundary_positions.add((start_x, y))
+        
+        # 右边界（X = start_x + length_x_grid - 1）
+        right_boundary_x = start_x + length_x_grid - 1
+        for y in range(right_y_start, right_y_end, max(1, stone_distance_grid)):
+            boundary_positions.add((right_boundary_x, y))
+        
+        # 下边界（Y = right_y_start）
+        for x in range(start_x, start_x + length_x_grid, max(1, stone_distance_grid)):
+            boundary_positions.add((x, right_y_start))
+        
+        # 上边界（Y = right_y_end - 1）
+        top_boundary_y = right_y_end - 1
+        for x in range(start_x, start_x + length_x_grid, max(1, stone_distance_grid)):
+            boundary_positions.add((x, top_boundary_y))
+        
+        # 合并所有位置
+        all_positions = list(boundary_positions)
+        
+        # 记录哪些位置是从边界生成的（用于后续判断）
+        boundary_generated_positions = set()
+        # 记录边界位置
+        for y in range(right_y_start, right_y_end, max(1, stone_distance_grid)):
+            boundary_generated_positions.add((start_x, y))
+            boundary_generated_positions.add((start_x + length_x_grid - 1, y))
+        for x in range(start_x, start_x + length_x_grid, max(1, stone_distance_grid)):
+            boundary_generated_positions.add((x, right_y_start))
+            boundary_generated_positions.add((x, right_y_end - 1))
+        
         # 在右边区域放置按环扩展的石块
-        for current_x, current_y in ring_positions:
-            actual_stone_x = min(stone_size_grid, start_x + length_x_grid - current_x)
-            actual_stone_y = min(stone_size_grid, right_y_end - current_y)
-            if actual_stone_x >= stone_size_grid * 0.1 and actual_stone_y >= stone_size_grid * 0.1:
-                terrain.height_field_raw[current_x:current_x + actual_stone_x,
-                                        current_y:current_y + actual_stone_y] = 0
+        # 最小石块尺寸（至少2个网格单位，确保有实际意义）
+        min_stone_size = max(2, round(stone_size_grid * 0.05))
+        for current_x, current_y in all_positions:
+            # 判断是否是边界位置（从边界位置生成的位置）
+            is_boundary = (current_x, current_y) in boundary_generated_positions
+            
+            if is_boundary:
+                # 边界位置：尽量填满边界
+                # X方向：尽量填满左右边界
+                available_x_left = current_x - start_x  # 左边可用空间
+                available_x_right = start_x + length_x_grid - current_x  # 右边可用空间
+                
+                # 如果靠近左边界，尽量向左延伸；如果靠近右边界，尽量向右延伸
+                if available_x_left < stone_size_grid // 2:
+                    # 靠近左边界，从左边界开始
+                    stone_x_start = start_x
+                    actual_stone_x = min(stone_size_grid, available_x_right + available_x_left)
+                elif available_x_right < stone_size_grid // 2:
+                    # 靠近右边界，尽量向右延伸
+                    stone_x_start = max(start_x, start_x + length_x_grid - stone_size_grid)
+                    actual_stone_x = min(stone_size_grid, available_x_right + available_x_left)
+                else:
+                    # 中间位置，直接使用当前位置
+                    stone_x_start = current_x
+                    actual_stone_x = min(stone_size_grid, 
+                                        start_x + length_x_grid - stone_x_start,
+                                        available_x_left + available_x_right)
+                
+                # Y方向：尽量填满上下边界
+                available_y_bottom = current_y - right_y_start  # 下边可用空间
+                available_y_top = right_y_end - current_y  # 上边可用空间
+                
+                # 如果靠近下边界，尽量向下延伸；如果靠近上边界，尽量向上延伸
+                if available_y_bottom < stone_size_grid // 2:
+                    # 靠近下边界，从下边界开始
+                    stone_y_start = right_y_start
+                    actual_stone_y = min(stone_size_grid, available_y_top + available_y_bottom)
+                elif available_y_top < stone_size_grid // 2:
+                    # 靠近上边界，尽量向上延伸
+                    stone_y_start = max(right_y_start, right_y_end - stone_size_grid)
+                    actual_stone_y = min(stone_size_grid, available_y_top + available_y_bottom)
+                else:
+                    # 中间位置，直接使用当前位置
+                    stone_y_start = current_y
+                    actual_stone_y = min(stone_size_grid,
+                                        right_y_end - stone_y_start,
+                                        available_y_bottom + available_y_top)
+            else:
+                # 非边界位置（环扩展位置）：直接使用计算好的位置，保持对齐
+                stone_x_start = current_x
+                stone_y_start = current_y
+                actual_stone_x = min(stone_size_grid, start_x + length_x_grid - stone_x_start)
+                actual_stone_y = min(stone_size_grid, right_y_end - stone_y_start)
+            
+            # 确保不超出边界
+            stone_x_end = min(start_x + length_x_grid, stone_x_start + actual_stone_x)
+            stone_y_end = min(right_y_end, stone_y_start + actual_stone_y)
+            actual_stone_x = stone_x_end - stone_x_start
+            actual_stone_y = stone_y_end - stone_y_start
+            
+            # 只要空间足够放置最小石块，就尽量放置（填满边界）
+            if actual_stone_x >= min_stone_size and actual_stone_y >= min_stone_size:
+                terrain.height_field_raw[stone_x_start:stone_x_end,
+                                        stone_y_start:stone_y_end] = 0
         
         # === 右边区域中心小平地 ===
         terrain.height_field_raw[small_platform_x_start:small_platform_x_end,
