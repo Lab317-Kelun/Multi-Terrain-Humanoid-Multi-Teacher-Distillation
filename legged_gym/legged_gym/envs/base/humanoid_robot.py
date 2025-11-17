@@ -383,8 +383,8 @@ class HumanoidRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        length = (self.cfg.terrain.terrain_length / 2) - 0.2
-        width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
+        length = (self.cfg.terrain.terrain_length / 2) - 0.1
+        width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.1
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
@@ -626,7 +626,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         obs_buf = torch.cat((
                             #skill_vector, 
