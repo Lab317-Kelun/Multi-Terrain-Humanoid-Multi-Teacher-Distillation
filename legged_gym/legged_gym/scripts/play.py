@@ -57,12 +57,12 @@ def play(args):
         env_cfg.domain_rand.action_delay_view = 0
 
     env_cfg.env.num_envs = 1
-    env_cfg.env.episode_length_s = 6
-    env_cfg.commands.resampling_time = 6
+    env_cfg.env.episode_length_s = 8
+    env_cfg.commands.resampling_time = 8
     env_cfg.rewards.is_play = True
 
     env_cfg.terrain.num_rows = 8
-    env_cfg.terrain.num_cols = 1
+    env_cfg.terrain.num_cols = 2
     env_cfg.terrain.max_init_terrain_level = 0
 
     env_cfg.terrain.height = [0.00, 0.02]
