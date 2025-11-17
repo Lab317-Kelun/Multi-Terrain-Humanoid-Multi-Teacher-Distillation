@@ -12,7 +12,7 @@ from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import resolve_optimizer
 
 
-class Distillation:
+class old_Distillation:
     """Distillation algorithm for training a student model to mimic a teacher model."""
 
     policy: MultiStudentTeacher 
@@ -21,12 +21,17 @@ class Distillation:
     def __init__(
         self,
         policy: MultiStudentTeacher ,
+        estimator,
+        estimator_paras,
         num_learning_epochs: int = 1,
         gradient_length: int = 15,
         learning_rate: float = 1e-3,
         max_grad_norm: float | None = None,
         loss_type: str = "mse",
         optimizer: str = "adam",
+        # RMA-style regularization (privileged vs history latent alignment)
+        # Format: [coef_start, coef_end, start_step, duration]
+        priv_reg_coef_schedual: list[float] = [0.0, 0.0, 0.0, 1.0],
         device: str = "cpu",
         # Distributed training parameters
         multi_gpu_cfg: dict | None = None,
@@ -60,6 +65,9 @@ class Distillation:
         self.gradient_length = gradient_length
         self.learning_rate = learning_rate
         self.max_grad_norm = max_grad_norm
+        # RMA priv reg schedule and counter
+        self.priv_reg_coef_schedual = priv_reg_coef_schedual
+        self.counter = 0
 
         # Initialize the loss function
         loss_fn_dict = {
@@ -116,6 +124,7 @@ class Distillation:
     def update(self) -> dict[str, float]:
         self.num_updates += 1
         mean_behavior_loss = 0
+        mean_priv_reg_loss = 0
         loss = 0
         cnt = 0
 
@@ -129,9 +138,37 @@ class Distillation:
                 # Behavior cloning loss
                 behavior_loss = self.loss_fn(actions, privileged_actions)
 
+                # RMA-style privileged-vs-history latent regularization on student
+                priv_reg_loss = 0.0
+                try:
+                    student_obs = self.policy.get_student_obs(obs)
+                    # Compute priv and hist latents from student actor
+                    # Match PPO semantics: stop gradients through history branch
+                    priv_latent = self.policy.student.infer_priv_latent(student_obs)
+                    with torch.inference_mode():
+                        hist_latent = self.policy.student.infer_hist_latent(student_obs)
+                    priv_reg_loss = (priv_latent - hist_latent.detach()).norm(p=2, dim=1).mean()
+                except Exception:
+                    # If student has no priv/hist configured, skip the term gracefully
+                    priv_reg_loss = 0.0
+
+                # Compute scheduled coefficient
+                if self.priv_reg_coef_schedual is not None and len(self.priv_reg_coef_schedual) == 4:
+                    s0, s1, t0, dur = self.priv_reg_coef_schedual
+                    stage = 0.0
+                    if dur > 0:
+                        stage = min(max((self.counter - t0), 0.0) / dur, 1.0)
+                    priv_reg_coef = stage * (s1 - s0) + s0
+                else:
+                    priv_reg_coef = 0.0
+
                 # Total loss
-                loss = loss + behavior_loss
+                loss = loss + behavior_loss + priv_reg_coef * priv_reg_loss
                 mean_behavior_loss += behavior_loss.item()
+                if isinstance(priv_reg_loss, torch.Tensor):
+                    mean_priv_reg_loss += priv_reg_loss.item()
+                else:
+                    mean_priv_reg_loss += float(priv_reg_loss)
                 cnt += 1
 
                 # Gradient step
@@ -150,13 +187,16 @@ class Distillation:
                 self.policy.reset(dones.view(-1))
                 self.policy.detach_hidden_states(dones.view(-1))
 
-        mean_behavior_loss /= cnt
+        mean_behavior_loss /= max(cnt, 1)
+        mean_priv_reg_loss /= max(cnt, 1)
         self.storage.clear()
         self.last_hidden_states = self.policy.get_hidden_states()
         self.policy.detach_hidden_states()
+        # Advance global counter (used for scheduling)
+        self.counter += 1
 
         # Construct the loss dictionary
-        loss_dict = {"behavior": mean_behavior_loss}
+        loss_dict = {"behavior": mean_behavior_loss, "priv_reg": mean_priv_reg_loss}
 
         return loss_dict
 

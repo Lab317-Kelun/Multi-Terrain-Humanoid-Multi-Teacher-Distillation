@@ -160,7 +160,7 @@ class PPO:
         self.transition.critic_observations = critic_obs
 
         return self.transition.actions
-    
+        
     def process_env_step(self, rewards, dones, infos):
         rewards_total = rewards.clone()
 
@@ -183,6 +183,19 @@ class PPO:
     
 
     def update(self):
+        """
+        标准的PPO更新过程。
+        主要用于强化学习训练，优化策略网络（actor_critic），包括策略损失、价值损失、熵正则化、估算器损失和特权正则化损失。
+        训练目标是最大化环境奖励，提升策略性能。
+        关键步骤：
+        1. 从采集到的rollout数据中采样mini-batch。
+        2. 计算PPO损失（包括clip surrogate loss、value loss、entropy loss等）。
+        3. 计算特权正则化损失（priv_reg_loss），用于对齐priv和hist latent。
+        4. 计算估算器损失（estimator_loss），用于估算特权状态。
+        5. 反向传播并更新actor_critic和estimator参数。
+        6. 返回各项损失的均值。
+        适用场景：标准强化学习训练，策略优化。
+        """
         mean_value_loss = 0
         mean_surrogate_loss = 0
         mean_estimator_loss = 0
@@ -285,6 +298,18 @@ class PPO:
         return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef
 
     def update_dagger(self):
+        """
+        DAgger（Dataset Aggregation）更新过程。
+        主要用于模仿学习中的历史编码器（history_encoder）训练，使其输出的hist latent更接近priv latent。
+        训练目标是让学生模型在自身分布下也能获得与专家一致的隐状态表达，从而缓解分布偏移问题。
+        关键步骤：
+        1. 从采集到的rollout数据中采样mini-batch。
+        2. 用actor_critic的priv_latent作为“专家”标签，hist_latent作为学生输出。
+        3. 计算priv_latent和hist_latent的距离损失（hist_latent_loss）。
+        4. 反向传播并仅更新history_encoder参数。
+        5. 返回hist_latent_loss的均值。
+        适用场景：DAgger交互式模仿学习，聚合数据集并训练历史编码器。
+        """
         mean_hist_latent_loss = 0
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
