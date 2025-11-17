@@ -128,6 +128,7 @@ class Distillation:
             ]
         self.priv_reg_coef_schedual = priv_reg_coef_schedual
         self.counter = 0
+        self.hist_encoder_optimizer = optim.Adam(self.policy.student.history_encoder.parameters(), lr=learning_rate, eps=adam_epsilon)
 
         # 蒸馏优化器（只优化学生参数）
         self.optimizer = optim.Adam(self.policy.student.parameters(), lr=learning_rate, eps=adam_epsilon)
