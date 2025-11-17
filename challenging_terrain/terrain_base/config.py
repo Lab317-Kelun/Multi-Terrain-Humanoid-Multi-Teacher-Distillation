@@ -16,7 +16,7 @@ class terrain_config:
         border_size = 2                 # 地形边界大小，单位：米
         
         # === 地形特征参数 === 
-        height = [0.00, 0.04]          # 随机粗糙度的高度范围 [最小, 最大]，单位：米
+        height = [0.00, 0.02]          # 随机粗糙度的高度范围 [最小, 最大]，单位：米
         simplify_grid = False           # 是否简化网格（减少三角形数量）
         downsampled_scale = 0.075       # 下采样比例
         curriculum = True               # 是否启用课程学习（难度递增）
@@ -44,23 +44,23 @@ class terrain_config:
         # 高度测量的域随机化参数（模拟真实传感器误差）
         measure_horizontal_noise = 0.     # 水平噪声幅度，单位：米
         measure_horizontal_offset = 0.    # 水平偏移量，单位：米
-        measure_vertical_offset = 0.00     # 垂直偏移量 U(-0.03, 0.03) m，模拟雷达系统性高度误差
-        measure_vertical_noise = 0.00       # 垂直噪声 U(-0.03, 0.03) m，模拟测量抖动
-        measure_map_roll_pitch_noise = 0.00 # 地图倾斜噪声 U(-0.03, 0.03) m，模拟俯仰/滚转旋转误差
+        measure_vertical_offset = 0.03     # 垂直偏移量 U(-0.03, 0.03) m，模拟雷达系统性高度误差
+        measure_vertical_noise = 0.03       # 垂直噪声 U(-0.03, 0.03) m，模拟测量抖动
+        measure_map_roll_pitch_noise = 0.03 # 地图倾斜噪声 U(-0.03, 0.03) m，模拟俯仰/滚转旋转误差
         measure_map_yaw_noise = 0.0         # 地图偏航噪声 U(-0.2, 0.2) rad，模拟偏航旋转误差
         # foothold_extension_prob = 0.6       # 支撑面扩展概率（暂时注释，需要重新理解和实现）
-        map_repeat_prob = 0.0               # 地图更新延迟概率，模拟地图刷新滞后
+        map_repeat_prob = 0.2               # 地图更新延迟概率，模拟地图刷新滞后
         
         # === 地形网格布局 ===
         max_init_terrain_level = 0      # 初始课程难度等级（从第几行开始）
-        terrain_length = 10.            # 单个地形块的长度（X方向），单位：米 8
+        terrain_length = 8.            # 单个地形块的长度（X方向），单位：米 8
         terrain_width = 5.              # 单个地形块的宽度（Y方向），单位：米 17
         platform_size = 1.5             # 起始平台大小，单位：米
         num_rows = 8                 # 地形行数（难度级别数）：0级最简单，8级最难
         num_cols = 5                   # 地形列数（地形类型数）：每列是不同的地形类型
         
         # === 目标点配置 ===
-        num_goals = 10                  # 每个地形块的目标点数量
+        num_goals = 8                  # 每个地形块的目标点数量
         
         # === 数据集采样点（15×15网格，间距0.1m，覆盖1.5m×1.5m） ===
         # X方向采样点：从-0.7m到+0.7m，间距0.1m，共15个点

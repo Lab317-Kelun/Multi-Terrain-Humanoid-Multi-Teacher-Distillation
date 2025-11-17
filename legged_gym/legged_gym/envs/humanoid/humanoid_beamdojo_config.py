@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 80 #与课程学习有关 
+        episode_length_s = 60.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -71,7 +71,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # 启用接触信息
         include_foot_contacts = True
         
-        next_goal_threshold = 0.5
+        next_goal_threshold = 0.4
         reach_goal_delay = 0.05
         num_future_goal_obs = 2
         
@@ -81,20 +81,20 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         success_mode = 'goal_reached'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
         
         # === 成功率计算模式 (用于日志记录) ===
-        success_rate_mode = 'goal_based'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
+        success_rate_mode = 'survival_time'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
         
         # 目标到达模式参数
-        success_threshold = 2  # 连续成功次数阈值
-        failure_threshold = 3  # 连续失败次数阈值
+        success_threshold = 3  # 连续成功次数阈值
+        failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 4  # 存活时间阈值（秒）
-        survival_success_threshold = 2  # 连续存活成功次数阈值
-        survival_failure_threshold = 3   # 连续存活失败次数阈值
+        survival_time_threshold = 20.0  # 存活时间阈值（秒）
+        survival_success_threshold = 3  # 连续存活成功次数阈值
+        survival_failure_threshold = 2   # 连续存活失败次数阈值
         
         # 速度模式参数
-        velocity_success_threshold = 2  # 连续速度成功次数阈值
-        velocity_failure_threshold = 3   # 连续速度失败次数阈值
+        velocity_success_threshold = 3  # 连续速度成功次数阈值
+        velocity_failure_threshold = 2   # 连续速度失败次数阈值
         
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
@@ -126,7 +126,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # decimation: Number of control action updates @ sim DT per policy DT
         decimation = 4    
         hip_reduction = 1.0
-    
     
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True            # 随机化摩擦系数
@@ -234,11 +233,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         flip_visual_attachments = False
         ankle_sole_distance = 0.02
 
-        
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
-        resampling_time = 4.0         # 命令重采样时间间隔（秒） 1
+        resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
@@ -249,30 +247,30 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.3, 1.2] # min max [m/s]
+            lin_vel_x = [0.1, 1.0] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
-            heading = [0.0, 0.0]
+            heading = [-0.0, 0.0] # base goal heading
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
         """BEAMDOJO奖励配置"""
         class scales:
-            tracking_x_vel = 2.5 #1.5
+            tracking_x_vel = 1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
-            heading_tracking = 1.0 #2.0 1.0 1.5
-            next_heading_tracking = 0.5 #1.5 0.5 1.0
+            heading_tracking = 1.0 #2.0 3.0
+            # next_heading_tracking = 0.5 #1.5 2.0
             # reach_goal = 2.0
             # center = -1.0 
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
-            orientation = -5.0 #-1.5 -2.0 -5.0 -10.0
+            orientation = -1.5 #-1.5 -2.0 -5.0 -10.0
             action_rate = -0.01
             
-            base_height = -10
-            # tracking_base_height = 2.
+            # base_height = -10.0
+            tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -298,9 +296,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             contact_momentum = 2.5e-4
             action_vanish = -1.0
             stand_still = -0.15   
-            termination = -20 #-10 -20 -30
+            # termination = -20 #-10 -20 -30
             
-            foothold = 0.1 #1.0 0.05 0.15 0.25 0.1 0.12
+            foothold = 0.05 #0.05 0.1 0.025
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -321,20 +319,21 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         foothold_foot_width = 0.06          # 脚宽度 [m]
         foothold_height_tolerance = -0.1    # 高度容忍度 [m]
         
-            
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            "heading_tracking", "next_heading_tracking", 
+            "heading_tracking", 
+            # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            "base_height", "deviation_hip_joint", "deviation_ankle_joint", 
+            "tracking_base_height", "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",
             "feet_stumble", "torques", "dof_vel", "dof_vel_limits", "torque_limits",
             "no_fly", "feet_slip", "feet_contact_forces",
-            "contact_momentum", "action_vanish", "stand_still",'termination'
+            "contact_momentum", "action_vanish", "stand_still",
+            # 'termination'
         ]
         sparse_rewards = ['foothold']
         
@@ -342,7 +341,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """归一化配置"""
         class obs_scales:
             lin_vel = 2.0
-            ang_vel = 0.25
+            ang_vel = 0.5
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
@@ -354,14 +353,14 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """噪声配置"""
         add_noise = True
         noise_level = 1.0
-        
         class noise_scales:
-            dof_pos = 0.05
+            dof_pos = 0.02
             dof_vel = 2.0
             lin_vel = 0.1
-            ang_vel = 0.1
+            ang_vel = 0.5
             gravity = 0.05
-
+            height_measurement = 0.1
+            
     class sim:
         """仿真配置"""
         dt = 0.005
@@ -452,39 +451,3 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
         num_scan = HumanoidBEAMDOJOCfg.env.n_scan
         num_hist = HumanoidBEAMDOJOCfg.env.history_len
-
-    # class depth_encoder(LeggedRobotCfgPPO.depth_encoder):
-    #     """深度编码器配置"""
-    #     pass  # 使用基类配置
-
-    # BEAMDOJO两阶段训练配置
-    # class training:
-    #     """两阶段训练配置"""
-    #     enable_two_stage = False  # 设置为True启用两阶段训练
-        
-    #     class stage1:
-    #         """Stage1软约束训练配置"""
-    #         min_steps = 1000000            # 最小训练步数
-    #         max_steps = 5000000            # 最大训练步数  
-    #         success_threshold = 0.8        # 成功率阈值
-    #         terrain_type = "flat_with_target_perception"
-    #         use_soft_termination = True    # 软终止：踩空不终止episode
-    #         use_target_perception = True   # 使用目标地形感知
-            
-    #         # Stage1命令范围（全方向）
-    #         class command_ranges:
-    #             lin_vel_x = [-1.0, 1.0]
-    #             lin_vel_y = [-1.0, 1.0]
-    #             ang_vel_yaw = [-1.0, 1.0]
-        
-    #     class stage2:
-    #         """Stage2硬约束训练配置"""
-    #         terrain_type = "sparse_terrain"
-    #         use_soft_termination = False   # 硬终止：踩空立即终止
-    #         use_target_perception = False  # 不使用目标地形感知
-            
-    #         # Stage2命令范围（仅前进）
-    #         class command_ranges:
-    #             lin_vel_x = [-1.0, 1.0]
-    #             lin_vel_y = [0.0, 0.0]     # 固定为0
-    #             ang_vel_yaw = [0.0, 0.0]   # 固定为0

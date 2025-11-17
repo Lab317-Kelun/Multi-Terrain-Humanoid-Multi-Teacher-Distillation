@@ -664,7 +664,7 @@ class HumanoidRobot(BaseTask):
         ), dim=-1)
         
         if self.cfg.terrain.measure_heights:
-            heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
+            heights = self.root_states[:, 2].unsqueeze(1) - self.measured_heights
             self.obs_buf = torch.cat([obs_buf, heights, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
         else:
             self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
@@ -809,8 +809,11 @@ class HumanoidRobot(BaseTask):
         if self.cfg.commands.heading_command:
             self.commands[:, 3] = self.target_yaw
             yaw_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
-            self.commands[:, 2] = torch.clip(0.8 * yaw_error, -1., 1.)
-            self.commands[:, 2] *= torch.abs(self.commands[:, 2]) > self.cfg.commands.ang_vel_clip
+            ang_vel_cmd = 0.8 * yaw_error
+            small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
+            self.commands[:, 2] = torch.where(small_command_mask, 
+                                            torch.zeros_like(ang_vel_cmd), 
+                                            ang_vel_cmd)
 
         if self.cfg.domain_rand.push_robots and (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -907,7 +910,6 @@ class HumanoidRobot(BaseTask):
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
             
-        # Stage2模式下，commands[3]在_update_goals中根据target_yaw设置，不需要在这里随机生成
         if not self.cfg.commands.heading_command:
             self.commands[env_ids, 2] = torch_rand_float(
                 self.command_ranges["ang_vel_yaw"][0],
@@ -915,10 +917,10 @@ class HumanoidRobot(BaseTask):
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
 
-        small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
-        self.commands[env_ids, 2] = torch.where(small_command_mask, 
-                                                torch.zeros_like(self.commands[env_ids, 2]), 
-                                                self.commands[env_ids, 2])
+            small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
+            self.commands[env_ids, 2] = torch.where(small_command_mask, 
+                                                    torch.zeros_like(self.commands[env_ids, 2]), 
+                                                    self.commands[env_ids, 2])
 
         small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
@@ -1046,7 +1048,7 @@ class HumanoidRobot(BaseTask):
             
             elif curriculum_cfg.success_mode == 'vel_tracking':
                 # 速度模式：判断是否达到指定速度
-                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.7 * self.reward_scales["tracking_x_vel"])
+                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
                 success_threshold = curriculum_cfg.velocity_success_threshold
                 failure_threshold = curriculum_cfg.velocity_failure_threshold
             
@@ -1629,9 +1631,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 9
+            y_start = - num_y / 2 * spacing
             x_end = -x_start + 0.08
-            y_end = -y_start + 18
+            y_end = -y_start 
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
             y_samples = torch.linspace(y_start, y_end, num_y, device=self.device)
@@ -1981,7 +1983,7 @@ class HumanoidRobot(BaseTask):
         return torch.exp(-ang_vel_error/self.cfg.rewards.tracking_sigma)
     
     def _reward_heading_tracking(self):
-        heading_error = wrap_to_pi(self.target_yaw - self.yaw)
+        heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
         return torch.exp(-torch.abs(heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
     
     def _reward_next_heading_tracking(self):
@@ -2001,15 +2003,12 @@ class HumanoidRobot(BaseTask):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
         return y_offset
     
-    # def _reward_base_height(self):
-    #     # Penalize base height away from target
-    #     base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-    #     return torch.square(base_height - self.cfg.rewards.base_height_target)
-
-    def _reward_base_height(self):
-        # Penalize base height away from target
-        base_height = torch.mean(self.root_states[:, 2].unsqueeze(1))
-        return torch.square(base_height - self.cfg.rewards.base_height_target)
+    def _reward_tracking_base_height(self):
+        base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
+        base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
+        base_height = torch.max(base_height_l, base_height_r)
+        height_error = torch.abs(base_height - self.cfg.rewards.base_height_target + self.cfg.asset.ankle_sole_distance)
+        return torch.exp(-height_error / self.cfg.rewards.tracking_sigma)
 
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
@@ -2026,13 +2025,6 @@ class HumanoidRobot(BaseTask):
     def _reward_action_rate(self):
         # Penalize changes in actions
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
-    
-    # def _reward_tracking_base_height(self):
-    #     base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
-    #     base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
-    #     base_height = torch.max(base_height_l, base_height_r)
-    #     height_error = torch.abs(base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance)
-    #     return torch.exp(-height_error * 4)
     
     def _reward_deviation_hip_joint(self):
         return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1)
@@ -2205,10 +2197,10 @@ class HumanoidRobot(BaseTask):
             
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
-            x_start = - num_x / 2 * spacing +0.01
-            y_start = - num_y / 2 * spacing # +9
+            x_start = - num_x / 2 * spacing + 0.01
+            y_start = - num_y / 2 * spacing 
             x_end = -x_start + 0.08
-            y_end = -y_start #+18
+            y_end = -y_start 
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)

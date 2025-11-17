@@ -350,19 +350,6 @@ class single_terrain:
             difficulty=0.5,       # 难度系数(0-1) → 映射到等级0-8
             gap_depth=1.0,        # 间隙深度(米)
             ):
-        """
-        BeamDojo标准GAP地形 - 按课程等级生成间隙地形
-        
-        难度等级(0-8)映射:
-        - Level 0: 平台0.7m, 间隙0.1m  (最简单)
-        - Level 4: 平台0.35m, 间隙0.3m (中等)
-        - Level 8: 平台0.2m, 间隙0.5m  (最难)
-        
-        参数:
-            difficulty: 0.0~1.0 映射到等级0~8
-            platform_size: 起始平台大小
-            gap_depth: 间隙深度(掉落惩罚)
-        """
         
         # 初始化目标点数组
         goals = np.zeros((num_goals, 2))
@@ -378,7 +365,7 @@ class single_terrain:
         
         # === BeamDojo课程等级参数 ===
         # 平台尺寸数组（按难度等级0-8）- 来自BeamDojo论文
-        platform_sizes = [0.7, 0.65, 0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.2]
+        platform_sizes = [0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.4, 0.4]
         
         # 根据difficulty计算当前等级
         difficulty_level = min(8, int(difficulty * 8))  # 映射到0-8
