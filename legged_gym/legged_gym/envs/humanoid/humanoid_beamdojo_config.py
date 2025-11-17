@@ -123,7 +123,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         decimation = 4    
         hip_reduction = 1.0
     
-    
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True            # 随机化摩擦系数
         friction_range = [0.8, 0.8]         # 恢复原始摩擦系数
@@ -392,14 +391,8 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         critic_hidden_dims = [1024, 512, 256, 128]
         activation = 'elu'
         
-        # 扫描编码器配置（可在MLP/CNN间切换）
-        scan_encoder_type = 'mlp'  # 取值: 'mlp' 或 'cnn'
-        scan_encoder_dims = [128, 64, 32]  # 仅当 type='mlp' 时有效
-        scan_cnn_channels = [128, 96, 64]
-        scan_cnn_kernel_sizes = [7, 5, 3]
-        scan_cnn_strides = [2, 2, 1]
-        scan_encoder_debug = True
-        
+        # 扫描编码器配置
+        scan_encoder_dims = [128, 64, 32]
         priv_encoder_dims = [64, 20]
         tanh_encoder_output = False  # 编码器输出是否使用tanh激活
         
@@ -456,39 +449,3 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
         num_scan = HumanoidBEAMDOJOCfg.env.n_scan
         num_hist = HumanoidBEAMDOJOCfg.env.history_len
-
-    # class depth_encoder(LeggedRobotCfgPPO.depth_encoder):
-    #     """深度编码器配置"""
-    #     pass  # 使用基类配置
-
-    # BEAMDOJO两阶段训练配置
-    # class training:
-    #     """两阶段训练配置"""
-    #     enable_two_stage = False  # 设置为True启用两阶段训练
-        
-    #     class stage1:
-    #         """Stage1软约束训练配置"""
-    #         min_steps = 1000000            # 最小训练步数
-    #         max_steps = 5000000            # 最大训练步数  
-    #         success_threshold = 0.8        # 成功率阈值
-    #         terrain_type = "flat_with_target_perception"
-    #         use_soft_termination = True    # 软终止：踩空不终止episode
-    #         use_target_perception = True   # 使用目标地形感知
-            
-    #         # Stage1命令范围（全方向）
-    #         class command_ranges:
-    #             lin_vel_x = [-1.0, 1.0]
-    #             lin_vel_y = [-1.0, 1.0]
-    #             ang_vel_yaw = [-1.0, 1.0]
-        
-    #     class stage2:
-    #         """Stage2硬约束训练配置"""
-    #         terrain_type = "sparse_terrain"
-    #         use_soft_termination = False   # 硬终止：踩空立即终止
-    #         use_target_perception = False  # 不使用目标地形感知
-            
-    #         # Stage2命令范围（仅前进）
-    #         class command_ranges:
-    #             lin_vel_x = [-1.0, 1.0]
-    #             lin_vel_y = [0.0, 0.0]     # 固定为0
-    #             ang_vel_yaw = [0.0, 0.0]   # 固定为0
