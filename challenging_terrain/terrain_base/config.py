@@ -54,7 +54,7 @@ class terrain_config:
         # === 地形网格布局 ===
         max_init_terrain_level = 0      # 初始课程难度等级（从第几行开始）
         terrain_length = 8.            # 单个地形块的长度（X方向），单位：米 8
-        terrain_width = 5.              # 单个地形块的宽度（Y方向），单位：米 17
+        terrain_width = 4.              # 单个地形块的宽度（Y方向），单位：米 17
         platform_size = 1.5             # 起始平台大小，单位：米
         num_rows = 8                 # 地形行数（难度级别数）：0级最简单，8级最难
         num_cols = 5                   # 地形列数（地形类型数）：每列是不同的地形类型
