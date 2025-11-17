@@ -32,3 +32,5 @@ from .ppo import PPO
 from .mirror import Mirror
 from .ppo_mirror import PPOMirror
 from .ppo_double_reward import PPODoubleReward
+from .distillation import Distillation
+from .multi_distillation import Distillation as MultiDistillation
