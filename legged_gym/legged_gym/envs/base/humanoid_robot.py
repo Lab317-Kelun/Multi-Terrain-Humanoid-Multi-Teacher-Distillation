@@ -626,7 +626,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         obs_buf = torch.cat((
                             #skill_vector, 
