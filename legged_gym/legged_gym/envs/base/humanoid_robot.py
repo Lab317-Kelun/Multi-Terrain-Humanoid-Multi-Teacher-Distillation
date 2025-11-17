@@ -385,13 +385,13 @@ class HumanoidRobot(BaseTask):
         # 检查机器人是否超出地形边界
         # length = (self.cfg.terrain.terrain_length / 2) - 0.2
         # width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
-        length = self.cfg.terrain.terrain_length- 0.2
-        width = self.cfg.terrain.terrain_width - 0.2
-        relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
-        x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
-        y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
+        # length = self.cfg.terrain.terrain_length- 0.2
+        # width = self.cfg.terrain.terrain_width - 0.2
+        # relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
+        # x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
+        # y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
         
-        boundary_cutoff = x_out_of_bounds | y_out_of_bounds
+        # boundary_cutoff = x_out_of_bounds | y_out_of_bounds
 
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
 
@@ -400,7 +400,7 @@ class HumanoidRobot(BaseTask):
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
         self.reset_buf |= height_cutoff
-        self.reset_buf |= boundary_cutoff  # 超出地形边界也终止
+        # self.reset_buf |= boundary_cutoff  # 超出地形边界也终止
 
         self.total_times += len(self.reset_buf.nonzero(as_tuple=False).flatten())
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
