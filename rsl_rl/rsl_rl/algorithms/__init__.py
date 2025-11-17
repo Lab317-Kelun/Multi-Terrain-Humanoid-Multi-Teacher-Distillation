@@ -31,4 +31,8 @@
 from .ppo import PPO
 from .mirror import Mirror
 from .ppo_mirror import PPOMirror
-from .ppo_double_reward import PPODoubleReward
+from .multi_distillation import Distillation
+try:
+	from rsl_rl.algorithms.ppo_double_reward import PPODoubleReward
+except ImportError:
+	PPODoubleReward = None

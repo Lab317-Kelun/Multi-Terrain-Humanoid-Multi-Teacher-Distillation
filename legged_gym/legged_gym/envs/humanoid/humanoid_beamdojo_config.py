@@ -449,3 +449,72 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
         num_scan = HumanoidBEAMDOJOCfg.env.n_scan
         num_hist = HumanoidBEAMDOJOCfg.env.history_len
+
+
+class HumanoidBEAMDOJODistillCfg(LeggedRobotCfgPPO):
+    """专用于教师-学生蒸馏的训练配置。"""
+
+    seed = 2
+    runner_class_name = 'DistillationRunner'
+
+    class policy:
+        class_name = 'MultiStudentTeacher'
+        activation = 'elu'
+        scan_encoder_dims = [128, 64, 32]
+        priv_encoder_dims = [64, 20]
+        student_actor_hidden_dims = [1024, 512, 256, 128]
+        teacher_actor_hidden_dims = [1024, 512, 256, 128]
+        init_noise_std = 0.2
+        student_obs_normalization = True
+        teacher_obs_normalization = False
+        student_hist_encoding = True
+        teacher_hist_encoding = False
+        student_num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
+        student_num_scan = HumanoidBEAMDOJOCfg.env.n_scan
+        student_num_priv_latent = HumanoidBEAMDOJOCfg.env.n_priv_latent
+        student_num_priv_explicit = HumanoidBEAMDOJOCfg.env.n_priv
+        student_num_hist = HumanoidBEAMDOJOCfg.env.history_len
+        teacher_num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
+        teacher_num_scan = HumanoidBEAMDOJOCfg.env.n_scan
+        teacher_num_priv_latent = HumanoidBEAMDOJOCfg.env.n_priv_latent
+        teacher_num_priv_explicit = HumanoidBEAMDOJOCfg.env.n_priv
+        teacher_num_hist = HumanoidBEAMDOJOCfg.env.history_len
+        noise_std_type = 'scalar'
+
+    class algorithm:
+        class_name = 'Distillation'
+        num_learning_epochs = 2
+        num_mini_batches = 4
+        learning_rate = 5.e-4
+        max_grad_norm = 1.0
+        dagger_update_freq = 50
+        priv_reg_coef_schedual = [0.0, 0.1, 2000, 3000]
+        gamma = 0.99
+        lam = 0.95
+        loss_type = 'mse'
+
+    class runner:
+        policy_class_name = 'MultiStudentTeacher'
+        algorithm_class_name = 'Distillation'
+        num_steps_per_env = 24
+        max_iterations = 20000
+        save_interval = 200
+        experiment_name = 'humanoid_beamdojo_distill'
+        run_name = ''
+        resume = False
+        load_run = -1
+        checkpoint = -1
+        resume_path = None
+        obs_groups = {
+            "policy": ["policy_obs"],
+            "teacher": ["teacher_obs"],
+        }
+
+    class estimator(LeggedRobotCfgPPO.estimator):
+        train_with_estimated_states = True
+        learning_rate = 1.e-4
+        hidden_dims = [256, 128, 64]
+        priv_states_dim = HumanoidBEAMDOJOCfg.env.n_priv
+        num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
+        num_scan = HumanoidBEAMDOJOCfg.env.n_scan
+        num_hist = HumanoidBEAMDOJOCfg.env.history_len

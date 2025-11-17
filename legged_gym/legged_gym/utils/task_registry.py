@@ -36,7 +36,7 @@ import torch
 import numpy as np
 
 from rsl_rl.env import VecEnv
-from rsl_rl.runners import OnPolicyRunner
+from rsl_rl.runners import OnPolicyRunner, DistillationRunner
 from rsl_rl.runners.on_policy_runner_mirror import OnPolicyRunnerMirror
 
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
@@ -159,14 +159,22 @@ class TaskRegistry():
         runner_class_name = train_cfg.runner_class_name
         if runner_class_name == "OnPolicyRunnerMirror":
             runner_class = OnPolicyRunnerMirror
+        elif runner_class_name == "DistillationRunner":
+            runner_class = DistillationRunner
         else:
             runner_class = OnPolicyRunner
-            
-        runner = runner_class(env, 
-                                train_cfg_dict, 
-                                log_dir, 
-                                init_wandb=init_wandb,
-                                device=args.rl_device, **kwargs)
+
+        runner = runner_class(
+            env,
+            train_cfg_dict,
+            log_dir,
+            init_wandb=init_wandb,
+            device=args.rl_device,
+            **kwargs,
+        )
+
+        if runner_class_name == "DistillationRunner":
+            self._prepare_distillation_runner(runner, train_cfg, args)
         #save resume path before creating a new log_dir
         resume = train_cfg.runner.resume
         if args.resumeid:
@@ -186,6 +194,50 @@ class TaskRegistry():
             return runner, train_cfg, os.path.dirname(resume_path)
         else:    
             return runner, train_cfg
+
+    def _prepare_distillation_runner(self, runner, train_cfg, args) -> None:
+        """Load teacher and optional student checkpoints for distillation runs."""
+
+        def _resolve_checkpoint(path: str | None, pattern: str = "model") -> str | None:
+            if path is None:
+                return None
+            expanded = os.path.expanduser(path)
+            if os.path.isdir(expanded):
+                return get_load_path(expanded, model_name_include=pattern)
+            if not os.path.exists(expanded):
+                raise FileNotFoundError(f"Checkpoint path '{path}' does not exist")
+            return expanded
+
+        def _load_teacher(policy, checkpoint_path: str) -> None:
+            ckpt = torch.load(checkpoint_path, map_location=runner.device)
+            if "model_state_dict" in ckpt:
+                policy.load_state_dict(ckpt["model_state_dict"], strict=False)
+            elif "policy_state_dict" in ckpt:
+                policy.load_state_dict(ckpt["policy_state_dict"], strict=False)
+            else:
+                raise ValueError(f"Teacher checkpoint '{checkpoint_path}' missing state dict")
+
+        def _load_student(policy, checkpoint_path: str) -> None:
+            ckpt = torch.load(checkpoint_path, map_location=runner.device)
+            if "student_state_dict" in ckpt:
+                policy.student.load_state_dict(ckpt["student_state_dict"], strict=False)
+                return
+            if "policy_state_dict" in ckpt:
+                student_state = {k[len("student."):]: v for k, v in ckpt["policy_state_dict"].items() if k.startswith("student.")}
+                policy.student.load_state_dict(student_state, strict=False)
+                return
+            raise ValueError(f"Student checkpoint '{checkpoint_path}' missing student parameters")
+
+        teacher_path = _resolve_checkpoint(getattr(args, "teacher_path", None) or getattr(train_cfg.policy, "teacher_path", None))
+        student_init = _resolve_checkpoint(getattr(args, "student_init", None))
+
+        if student_init is not None:
+            _load_student(runner.alg.policy, student_init)
+        
+        if teacher_path is not None:
+            _load_teacher(runner.alg.policy, teacher_path)
+        elif not train_cfg.runner.resume:
+            raise ValueError("Distillation runs require --teacher_path unless resuming from a checkpoint")
 
 # make global task registry
 task_registry = TaskRegistry()

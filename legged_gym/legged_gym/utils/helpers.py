@@ -163,6 +163,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.depth_encoder.if_depth = args.use_camera
         if args.max_iterations is not None:
             cfg_train.runner.max_iterations = args.max_iterations
+        if args.distill_iterations is not None:
+            cfg_train.runner.max_iterations = args.distill_iterations
         if args.resume:
             cfg_train.runner.resume = args.resume
             cfg_train.algorithm.priv_reg_coef_schedual = cfg_train.algorithm.priv_reg_coef_schedual_resume
@@ -185,6 +187,9 @@ def get_args():
         {"name": "--run_name", "type": str,  "help": "Name of the run. Overrides config file if provided."},
         {"name": "--load_run", "type": str,  "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
         {"name": "--checkpoint", "type": int, "default": -1, "help": "Saved model checkpoint number. If -1: will load the last checkpoint. Overrides config file if provided."},
+        {"name": "--teacher_path", "type": str, "default": None, "help": "Path to the pretrained teacher checkpoint used for distillation."},
+        {"name": "--student_init", "type": str, "default": None, "help": "Optional path to resume a student checkpoint before distillation."},
+        {"name": "--distill_iterations", "type": int, "default": None, "help": "Override number of distillation iterations (defaults to config)."},
         
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--rl_device", "type": str, "default": "cuda:0", "help": 'Device used by the RL algorithm, (cpu, gpu, cuda:0, cuda:1 etc..)'},

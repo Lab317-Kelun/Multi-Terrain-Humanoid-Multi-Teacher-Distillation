@@ -33,3 +33,4 @@ from .actor_critic import ActorCriticRMA, ActorCriticRMADoubleReward
 from .estimator import Estimator
 from .estimator import Discriminator, DiscriminatorLSD, DiscriminatorContDIAYN
 from .depth_backbone import *
+from .teacher_student import MultiStudentTeacher

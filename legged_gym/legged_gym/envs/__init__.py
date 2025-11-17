@@ -37,8 +37,9 @@ from .base.humanoid_robot import HumanoidRobot
 
 # BEAMDOJO humanoid configurations
 from .humanoid.humanoid_beamdojo_config import (
-    HumanoidBEAMDOJOCfg, 
+    HumanoidBEAMDOJOCfg,
     HumanoidBEAMDOJOCfgPPO,
+    HumanoidBEAMDOJODistillCfg,
 )
 
 from legged_gym.utils.task_registry import task_registry
@@ -50,3 +51,4 @@ from legged_gym.utils.task_registry import task_registry
 
 # Register BEAMDOJO tasks
 task_registry.register("humanoid_beamdojo", HumanoidRobot, HumanoidBEAMDOJOCfg(), HumanoidBEAMDOJOCfgPPO())
+task_registry.register("humanoid_beamdojo_distill", HumanoidRobot, HumanoidBEAMDOJOCfg(), HumanoidBEAMDOJODistillCfg())

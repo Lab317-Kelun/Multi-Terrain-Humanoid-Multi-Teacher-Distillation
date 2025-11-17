@@ -28,7 +28,13 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import os
+import subprocess
+from pathlib import Path
+from typing import Dict, Iterable
+
 import torch
+from tensordict import TensorDict
 
 def split_and_pad_trajectories(tensor, dones):
     """ Splits trajectories at done indices. Then concatenates them and padds with zeros up to the length og the longest trajectory.
@@ -69,3 +75,72 @@ def unpad_trajectories(trajectories, masks):
     """
     # Need to transpose before and after the masking to have proper reshaping
     return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0], trajectories.shape[-1]).transpose(1, 0)
+
+
+def resolve_obs_groups(obs: TensorDict, cfg_groups: Dict[str, Iterable[str]] | None, default_sets: Iterable[str] | None = None) -> Dict[str, list[str]]:
+    """Resolve observation group names for MultiStudentTeacher.
+
+    Ensures each required set has a non-empty list of tensor keys. When a
+    configuration is missing, it falls back to the keys present in the provided
+    :class:`TensorDict` sample.
+    """
+
+    resolved: Dict[str, list[str]] = {}
+    cfg_groups = cfg_groups or {}
+    for name, group_list in cfg_groups.items():
+        if group_list is None:
+            resolved[name] = []
+        elif isinstance(group_list, (list, tuple)):
+            resolved[name] = list(group_list)
+        else:
+            resolved[name] = [str(group_list)]
+
+    available_keys = list(obs.keys()) if isinstance(obs, TensorDict) else []
+    if default_sets:
+        for set_name in default_sets:
+            if set_name not in resolved or len(resolved[set_name]) == 0:
+                resolved[set_name] = available_keys.copy()
+
+    return resolved
+
+
+def store_code_state(log_dir: str | None, module_file_paths: list[str]) -> list[str]:
+    """Persist git status/diff files for the provided repositories.
+
+    Args:
+        log_dir: Output directory where the files should be written.
+        module_file_paths: List of file paths that belong to git repositories.
+
+    Returns:
+        List of generated file paths.
+    """
+
+    if log_dir is None:
+        return []
+    os.makedirs(log_dir, exist_ok=True)
+    saved_paths: list[str] = []
+    for module_path in module_file_paths:
+        if module_path is None:
+            continue
+        module_path = Path(module_path).resolve()
+        repo_dir = None
+        try:
+            repo_dir = subprocess.check_output(
+                ["git", "-C", str(module_path.parent), "rev-parse", "--show-toplevel"],
+                text=True,
+            ).strip()
+        except subprocess.CalledProcessError:
+            continue
+
+        repo_name = Path(repo_dir).name
+        status_file = Path(log_dir) / f"{repo_name}_git_status.txt"
+        diff_file = Path(log_dir) / f"{repo_name}_git_diff.patch"
+
+        with status_file.open("w", encoding="utf-8") as fh:
+            subprocess.run(["git", "-C", repo_dir, "status", "-sb"], stdout=fh, stderr=subprocess.STDOUT, check=False)
+        with diff_file.open("w", encoding="utf-8") as fh:
+            subprocess.run(["git", "-C", repo_dir, "diff"], stdout=fh, stderr=subprocess.STDOUT, check=False)
+
+        saved_paths.extend([str(status_file), str(diff_file)])
+
+    return saved_paths

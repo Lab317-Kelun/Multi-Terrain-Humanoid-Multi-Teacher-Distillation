@@ -1,9 +1,11 @@
 from .humanoid_beamdojo_config import (
-    HumanoidBEAMDOJOCfg, 
+    HumanoidBEAMDOJOCfg,
     HumanoidBEAMDOJOCfgPPO,
+    HumanoidBEAMDOJODistillCfg,
 )
 
 __all__ = [
     'HumanoidBEAMDOJOCfg',
-    'HumanoidBEAMDOJOCfgPPO'
+    'HumanoidBEAMDOJOCfgPPO',
+    'HumanoidBEAMDOJODistillCfg',
 ]
