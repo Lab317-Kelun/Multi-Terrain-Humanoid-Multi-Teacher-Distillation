@@ -74,7 +74,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     # 课程学习配置
     class curriculum_config:
         # === 课程学习成功判定模式 ===
-        success_mode = 'survival_time'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
+        success_mode = 'vel_tracking'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
         
         # === 成功率计算模式 (用于日志记录) ===
         success_rate_mode = 'survival_time'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
@@ -84,8 +84,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 6.0  # 存活时间阈值（秒）
-        survival_success_threshold = 1  # 连续存活成功次数阈值
+        survival_time_threshold = 20.0  # 存活时间阈值（秒）
+        survival_success_threshold = 3  # 连续存活成功次数阈值
         survival_failure_threshold = 2   # 连续存活失败次数阈值
         
         # 速度模式参数
@@ -244,10 +244,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.5, 1.0] # min max [m/s]
-            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+            lin_vel_x = [-0.8, 1.5] # min max [m/s]
+            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
-            heading = [-0.0, 0.0]
+            heading = [-1.0, 1.0]
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -295,7 +295,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still = -0.15   
             # termination = -20 #-10 -20 -30
             
-            foothold = 0.025 #0.05 0.1 0.025
+            foothold = 0.05 #0.05 0.1 0.025
             
         only_positive_rewards = False
         tracking_sigma = 0.25
