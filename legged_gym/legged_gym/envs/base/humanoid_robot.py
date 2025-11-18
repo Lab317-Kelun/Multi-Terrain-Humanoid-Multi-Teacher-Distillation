@@ -559,7 +559,7 @@ class HumanoidRobot(BaseTask):
             if self.cfg.rewards.only_positive_rewards:
                 self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
                 self.dense_rew_buf[:] = torch.clip(self.dense_rew_buf[:], min=0.)
-                self.sparse_rew_buf[:] = torch.clip(self.sparse_rew_buf[:], min=0.)
+                # self.sparse_rew_buf[:] = torch.clip(self.sparse_rew_buf[:], min=0.)
         else:
             # 原有的单一奖励逻辑
             for i in range(len(self.reward_functions)):
@@ -628,7 +628,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         
         obs_buf = torch.cat((

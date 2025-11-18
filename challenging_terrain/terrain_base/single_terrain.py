@@ -132,12 +132,13 @@ class single_terrain:
                 start_y = 0,
                 platform_size=1.0, 
                 difficulty = 0.5,
-                bridge_width_range=[0.3,0.4],  
+                bridge_width_range=[0.2,0.4],  
                 bridge_height=0.7,
                 ):
         goals = np.zeros((num_goals, 2))
         mid_y = round(length_y / terrain.horizontal_scale) // 2  
-        bridge_width = round(((bridge_width_range[1]-bridge_width_range[0])*difficulty +bridge_width_range[0])/terrain.horizontal_scale)
+        # 难度越高，桥越窄：difficulty=0时最宽，difficulty=1时最窄
+        bridge_width = round(((bridge_width_range[1]-bridge_width_range[0])*(1-difficulty) +bridge_width_range[0])/terrain.horizontal_scale)
         bridge_height = round(bridge_height / terrain.vertical_scale)
         platform_size = round(platform_size / terrain.horizontal_scale)
         terrain.height_field_raw[start_x:start_x+platform_size, start_y:start_y+2*mid_y] = 0
@@ -145,8 +146,17 @@ class single_terrain:
         bridge_length = round(length_x / terrain.horizontal_scale)
         bridge_end_x = start_x + bridge_length
 
+        # 在桥上均匀分布目标点，确保所有目标点都在桥上（不超过bridge_end_x）
+        # 计算桥的实际长度（从bridge_start_x到bridge_end_x）
+        actual_bridge_length = bridge_end_x - bridge_start_x
         for i in range(num_goals):
-            goals[i] = [bridge_start_x + bridge_length/num_goals*i, mid_y]  
+            # 计算目标点的位置，确保最后一个目标点不会超过桥的结束位置
+            # 使用 (i + 0.5) / num_goals 来均匀分布，确保第一个和最后一个目标点都在桥内
+            relative_pos = (i + 0.5) / num_goals
+            goal_x = bridge_start_x + int(actual_bridge_length * relative_pos)
+            # 确保目标点不超过桥的结束位置
+            goal_x = min(goal_x, bridge_end_x - 1)
+            goals[i] = [goal_x, mid_y]
        
         left_y1 = 0
         left_y2 = int(mid_y - bridge_width // 2) 
@@ -243,8 +253,8 @@ class single_terrain:
                 ):
 
         goals = np.zeros((num_goals, 2))
-        platform_size = round(platform_size/ terrain.horizontal_scale)
-        per_x = (round(length_x/ terrain.horizontal_scale)- platform_size) // num_goals
+        platform_size_grid = round(platform_size/ terrain.horizontal_scale)
+        length_x_grid = round(length_x/ terrain.horizontal_scale)
         per_y = round(length_y/ terrain.horizontal_scale) // 2
         step_height = round(((height_range[1]-height_range[0])*difficulty + height_range[0])/terrain.vertical_scale)
         step_x = round(((size_range[0]-size_range[1])*difficulty +size_range[1])/terrain.horizontal_scale)
@@ -254,24 +264,31 @@ class single_terrain:
         else:
             total_step_height = round(start_z/terrain.vertical_scale)
 
-        dis_x = start_x + platform_size
+        dis_x = start_x + platform_size_grid
 
-        for i in range(num_goals):
-            goals[i]=[dis_x+per_x*i,start_y+per_y]
-
+        # 创建台阶并记录每个台阶的位置
         for i in range(num_goals):
             if(upstair):
                 total_step_height += step_height
             else :
                 total_step_height -= step_height
 
+            # 创建台阶
             terrain.height_field_raw[dis_x : dis_x + step_x, start_y : start_y + per_y*2] = total_step_height
+            
+            # 在当前台阶的中心位置放置目标点
+            goal_x = dis_x + step_x // 2
+            goals[i] = [goal_x, start_y + per_y]
+            
             dis_x += step_x
 
-        # terrain.height_field_raw[start_x:start_x+platform_size,start_y:start_y + per_y*2] = 0
-        terrain.height_field_raw[dis_x:start_x+round(length_x/ terrain.horizontal_scale),start_y:start_y + per_y*2] = total_step_height
+        # 在最后一个台阶后延伸一个平台（与最后一个台阶同高度），避免机器人掉下去
+        # 延伸平台的长度为2-3个台阶的长度，或者填充到地形结束
+        extension_length = min(step_x * 3, start_x + length_x_grid - dis_x)
+        if extension_length > 0:
+            terrain.height_field_raw[dis_x:dis_x + extension_length, start_y:start_y + per_y*2] = total_step_height
 
-        return terrain,goals,start_x+round(length_x/ terrain.horizontal_scale)
+        return terrain, goals, start_x + length_x_grid
 
     def wave(terrain,
             length_x=18.0,
@@ -809,3 +826,94 @@ class single_terrain:
                                 small_platform_y_start:small_platform_y_end] = 0
         
         return terrain, goals, start_x + length_x_grid
+    
+    
+    def bridge_gap(terrain,
+                   length_x=18.0,
+                   length_y=4.0,
+                   num_goals=8,
+                   start_x=0,
+                   start_y=0,
+                   platform_size=1.0,
+                   difficulty=0.5,
+                   bridge_width_range=[0.3, 0.4],
+                   bridge_height=0.7,
+                   ):
+        """
+        独木桥+间隙地形：在窄桥上创建间隙，形成桥段-间隙-桥段的组合
+        结合了bridge（独木桥）和gap（间隙）的特点
+        """
+        goals = np.zeros((num_goals, 2))
+        
+        # 转换基本参数为网格单位（与bridge函数保持一致）
+        mid_y = round(length_y / terrain.horizontal_scale) // 2
+        
+        # === 桥的宽度计算（难度越高，桥越窄）===
+        bridge_width = round(((bridge_width_range[1]-bridge_width_range[0])*(1-difficulty) + bridge_width_range[0]) / terrain.horizontal_scale)
+        bridge_height_grid = round(bridge_height / terrain.vertical_scale)
+        platform_size_grid = round(platform_size / terrain.horizontal_scale)
+        
+        # === 间隙参数计算（使用BeamDojo课程等级）===
+        platform_sizes = [0.7, 0.7, 0.65, 0.65, 0.6, 0.6, 0.55, 0.55, 0.5]
+        difficulty_level = min(8, int(difficulty * 8))
+        bridge_segment_size = platform_sizes[difficulty_level]  # 桥段长度
+        gap_distance = 0.05 + 0.03125 * difficulty_level  # 间隙宽度: 0.05m → 0.3m
+        
+        # 转换为网格单位
+        bridge_segment_grid = round(bridge_segment_size / terrain.horizontal_scale)
+        gap_distance_grid = round(gap_distance / terrain.horizontal_scale)
+        
+        # === 第1步: 创建起始平台 ===
+        terrain.height_field_raw[start_x:start_x+platform_size_grid, start_y:start_y+2*mid_y] = 0
+        
+        # === 第2步: 将桥区域两侧填充为深坑（桥两侧始终是深坑）===
+        bridge_start_x = platform_size_grid + start_x
+        bridge_length_grid = round(length_x / terrain.horizontal_scale)
+        bridge_end_x = start_x + bridge_length_grid
+        
+        # 计算桥的左右边界（与bridge函数保持一致，使用绝对坐标）
+        left_y1 = 0
+        left_y2 = int(mid_y - bridge_width // 2)
+        right_y1 = int(mid_y + bridge_width // 2)
+        right_y2 = mid_y * 2
+        
+        # 整个桥区域两侧都是深坑
+        terrain.height_field_raw[bridge_start_x:bridge_end_x, left_y1:left_y2] = -bridge_height_grid
+        terrain.height_field_raw[bridge_start_x:bridge_end_x, right_y1:right_y2] = -bridge_height_grid
+        
+        # === 第3步: 在桥上创建桥段和间隙的交替序列 ===
+        current_x = bridge_start_x
+        goal_idx = 0
+        
+        # 循环生成: [桥段] → [间隙] → [桥段] → [间隙] → ...
+        while current_x < bridge_end_x:
+            # 创建桥段（在桥的中心区域，高度=0）
+            segment_end = min(current_x + bridge_segment_grid, bridge_end_x)
+            terrain.height_field_raw[current_x:segment_end, left_y2:right_y1] = 0
+            
+            # 在桥段中心放置目标点
+            if goal_idx < num_goals:
+                segment_center_x = current_x + bridge_segment_grid // 2
+                if segment_center_x < bridge_end_x:
+                    goals[goal_idx] = [segment_center_x, mid_y]
+                    goal_idx += 1
+            
+            # 移动到下一个位置
+            current_x += bridge_segment_grid
+            
+            # 创建间隙（在桥的中心区域挖空，形成深坑）
+            if current_x < bridge_end_x:
+                gap_end = min(current_x + gap_distance_grid, bridge_end_x)
+                # 间隙区域保持深坑（已经是-bridge_height_grid，但为了清晰可以显式设置）
+                terrain.height_field_raw[current_x:gap_end, left_y2:right_y1] = -bridge_height_grid
+                current_x = gap_end
+        
+        # === 第4步: 如果目标点不足，补齐到num_goals ===
+        if goal_idx < num_goals:
+            print(f"Warning: Only generated {goal_idx}/{num_goals} goals in bridge_gap terrain")
+            if goal_idx > 0:
+                last_goal = goals[goal_idx - 1]
+                for i in range(goal_idx, num_goals):
+                    goals[i] = last_goal
+        
+        return terrain, goals, bridge_end_x

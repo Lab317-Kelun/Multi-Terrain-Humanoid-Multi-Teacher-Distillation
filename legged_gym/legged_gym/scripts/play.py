@@ -65,7 +65,8 @@ def play(args):
     env_cfg.curriculum_config.success_threshold = 1  # 连续存活成功次数阈值
     env_cfg.curriculum_config.failure_threshold = 2   # 连续存活失败次数阈值
 
-    env_cfg.commands.ranges.lin_vel_x = [0.5, 1.0]
+    env_cfg.commands.ranges.lin_vel_x = [0.5, 1.2]
+    env_cfg.commands.ranges.lin_vel_y = [0.0, 0.0]
     env_cfg.commands.ranges.ang_vel_yaw = [-0.0, 0.0]
     env_cfg.commands.ranges.heading = [-0.0, 0.0]
     env_cfg.commands.ranges.height = [-0.0, 0.0]
