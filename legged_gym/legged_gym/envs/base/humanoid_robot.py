@@ -626,7 +626,10 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        
+        # 获取步态相位观测
+        phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -642,13 +645,14 @@ class HumanoidRobot(BaseTask):
                             # (self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos, # 12
                             # self.dof_vel * self.obs_scales.dof_vel,  # 12
                             # self.action_history_buf[:, -1], # 12
-                            # self.contact_filt.float()-0.5, # 2
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
                             self.action_history_buf[:, -1, :12], # R^{12}
+                            # phase_obs,               # R^2 (sin_phase, cos_phase) - 步态相位信息
+                            self.contact_filt.float(), # 2 接触信息
                             ), dim=-1)
         
         priv_explicit = self.base_lin_vel * self.obs_scales.lin_vel
@@ -820,6 +824,46 @@ class HumanoidRobot(BaseTask):
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
+        
+        # 更新步态相位信息（用于交替步态）
+        self._update_gait_phase()
+    
+    def _update_gait_phase(self):
+        """
+        更新步态相位信息
+        
+        基于时间的固定周期相位，用于locomotion任务中的交替步态
+        相位周期：0.8秒（典型的人类行走周期）
+        左右脚相位偏移：0.5（180度，确保交替）
+        """
+        period = 0.8  # 步态周期（秒）
+        offset = 0.5  # 左右脚相位偏移（0.5 = 180度）
+        
+        # 计算全局相位：基于episode时间，周期为period
+        self.phase = (self.episode_length_buf * self.dt) % period / period
+        
+        # 计算左右脚相位（右脚相位偏移0.5，形成交替）
+        self.phase_left = self.phase
+        self.phase_right = (self.phase + offset) % 1.0
+        
+        # 组合成leg_phase张量 [num_envs, 2] (左, 右)
+        self.leg_phase = torch.cat([self.phase_left.unsqueeze(1), self.phase_right.unsqueeze(1)], dim=-1)
+    
+    def _obs_phase(self):
+        """
+        步态相位观测（sin/cos编码）
+        
+        将相位信息编码为sin/cos形式，便于神经网络学习周期性模式
+        返回维度：2 (sin_phase, cos_phase)
+        
+        为什么用sin/cos编码？
+        1. 周期性连续性：相位0和相位1在数值上相差很大，但sin/cos编码后它们是连续的
+        2. 便于学习：神经网络更容易学习周期性的sin/cos模式
+        3. 标准做法：在locomotion任务中广泛使用（如RMA, BEAMDOJO等）
+        """
+        sin_phase = torch.sin(2 * torch.pi * self.phase).unsqueeze(1)
+        cos_phase = torch.cos(2 * torch.pi * self.phase).unsqueeze(1)
+        return torch.cat((sin_phase, cos_phase), dim=-1)
     
     def _gather_cur_goals(self, future=0):
         return self.env_goals.gather(1, (self.cur_goal_idx[:, None, None]+future).expand(-1, -1, self.env_goals.shape[-1])).squeeze(1)
@@ -1160,6 +1204,12 @@ class HumanoidRobot(BaseTask):
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        
+        # 初始化步态相位相关变量
+        self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.phase_left = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.phase_right = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.leg_phase = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
         
         str_rng = self.cfg.domain_rand.motor_strength_range
         self.motor_strength = (str_rng[1] - str_rng[0]) * torch.rand(2, self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False) + str_rng[0]

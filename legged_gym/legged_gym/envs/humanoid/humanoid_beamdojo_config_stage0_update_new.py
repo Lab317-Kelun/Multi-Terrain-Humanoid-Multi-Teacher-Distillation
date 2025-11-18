@@ -61,7 +61,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 77  # 实际obs_buf维度：3(commands)+3(ang_vel)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=75
+        n_proprio = 75  # 实际obs_buf维度：3+3+3+27+27+12=75
         history_len = 10
         
         # 重新计算总观测维度
@@ -244,7 +244,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [-0.8, 1.5] # min max [m/s]
+            lin_vel_x = [-0.8, 1.0] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
             heading = [-1.0, 1.0]
@@ -263,7 +263,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
-            orientation = -1.5 
+            orientation = -1.5  # 从-1.5降低，减少过强的姿态稳定压力，允许更多动态步态
             action_rate = -0.01
             
             # base_height = -10.0
@@ -273,12 +273,12 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             deviation_knee_joint = -0.75
             dof_acc = -2.5e-7
             dof_pos_limits = -2.
-            feet_air_time = 0.05   
-            feet_clearance = -0.25
-            feet_distance_lateral = 0.5  
-            knee_distance_lateral = 1.0
-            feet_ground_parallel = -2.0  
-            feet_parallel = -3.0  
+            feet_air_time = 1.0   # 增加权重以鼓励抬脚和交替步态（从0.05增加到1.0）
+            feet_clearance = -1.0  #   -1.0 
+            feet_distance_lateral = 0.5  # 从0.5降低，弱化横向距离稳定性要求 0.5
+            knee_distance_lateral = 0.0  # 从1.0降低，弱化膝关节横向距离稳定性 0.0
+            feet_ground_parallel = -0.02  # 从-2.0改为0，关闭此奖励（强烈抑制交替步态）-0.02
+            feet_parallel = 0.0  # 从-3.0改为0，关闭此奖励（这是最关键的，强烈抑制交替步态）
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
