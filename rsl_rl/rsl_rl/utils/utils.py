@@ -28,7 +28,12 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import subprocess
+from pathlib import Path
+from typing import Dict, Iterable, Tuple
+
 import torch
+from tensordict import TensorDict
 
 def split_and_pad_trajectories(tensor, dones):
     """ Splits trajectories at done indices. Then concatenates them and padds with zeros up to the length og the longest trajectory.
@@ -69,3 +74,83 @@ def unpad_trajectories(trajectories, masks):
     """
     # Need to transpose before and after the masking to have proper reshaping
     return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0], trajectories.shape[-1]).transpose(1, 0)
+
+
+def resolve_obs_groups(obs: torch.Tensor | TensorDict,
+                       obs_groups_cfg: Dict,
+                       default_sets: Iterable[str] | None = None
+                       ) -> Tuple[TensorDict, Dict]:
+    """Resolve observation groups into TensorDict slices and metadata."""
+    if obs_groups_cfg is None:
+        raise ValueError("obs_groups configuration is required for distillation training.")
+    group_defs = obs_groups_cfg.get("groups")
+    if group_defs is None:
+        raise ValueError("obs_groups configuration must contain a 'groups' mapping with slice definitions.")
+
+    resolved_cfg = dict(obs_groups_cfg)
+    group_slices: Dict[str, slice] = {}
+    for name, spec in group_defs.items():
+        if "start" not in spec:
+            raise ValueError(f"Observation group '{name}' is missing 'start' index.")
+        start = int(spec["start"])
+        if "length" in spec:
+            end = start + int(spec["length"])
+        elif "end" in spec:
+            end = spec["end"]
+        else:
+            raise ValueError(f"Observation group '{name}' must define either 'length' or 'end'.")
+        group_slices[name] = slice(start, end)
+    resolved_cfg["group_slices"] = group_slices
+
+    if default_sets:
+        for set_name in default_sets:
+            resolved_cfg.setdefault(set_name, list(group_slices.keys()))
+
+    obs_td = tensor_to_obs_groups(obs, resolved_cfg)
+    return obs_td, resolved_cfg
+
+
+def tensor_to_obs_groups(obs: torch.Tensor | TensorDict, obs_groups_cfg: Dict) -> TensorDict:
+    """Convert a flat observation tensor to a TensorDict according to group slices."""
+    if isinstance(obs, TensorDict):
+        return obs
+    if obs.ndim != 2:
+        raise ValueError("Observations must be a 2D tensor of shape [num_envs, obs_dim].")
+    group_slices = obs_groups_cfg.get("group_slices")
+    if not group_slices:
+        raise ValueError("obs_groups configuration missing 'group_slices'. Call resolve_obs_groups first.")
+    group_tensors = {name: obs[:, slc] for name, slc in group_slices.items()}
+    return TensorDict(group_tensors, batch_size=[obs.shape[0]])
+
+
+def store_code_state(log_dir: str | None, repo_paths: Iterable[str]) -> list[str]:
+    """Dump git diff files for the provided repositories into the log directory."""
+    if not log_dir:
+        return []
+    saved_files: list[str] = []
+    log_path = Path(log_dir)
+    log_path.mkdir(parents=True, exist_ok=True)
+
+    for module_path in repo_paths:
+        module_path = Path(module_path).resolve()
+        repo_root = _find_git_root(module_path)
+        if repo_root is None:
+            continue
+        try:
+            diff = subprocess.check_output(["git", "-C", str(repo_root), "diff"], stderr=subprocess.STDOUT)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+        if not diff.strip():
+            continue
+        patch_name = f"{repo_root.name}_code_state.patch"
+        patch_path = log_path / patch_name
+        patch_path.write_bytes(diff)
+        saved_files.append(str(patch_path))
+    return saved_files
+
+
+def _find_git_root(start_path: Path) -> Path | None:
+    for path in [start_path, *start_path.parents]:
+        if (path / ".git").exists():
+            return path
+    return None

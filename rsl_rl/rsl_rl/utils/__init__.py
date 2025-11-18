@@ -28,4 +28,10 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from .utils import split_and_pad_trajectories, unpad_trajectories
+from .utils import (
+	split_and_pad_trajectories,
+	unpad_trajectories,
+	resolve_obs_groups,
+	tensor_to_obs_groups,
+	store_code_state,
+)

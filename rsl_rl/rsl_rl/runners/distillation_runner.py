@@ -6,17 +6,26 @@
 from __future__ import annotations
 
 import os
+import statistics
 import time
-import torch
 from collections import deque
+from pathlib import Path
+
+import torch
+import torch.distributed as dist
 from tensordict import TensorDict
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ImportError:  # pragma: no cover - tensorboard is optional
+    SummaryWriter = None
 
 import rsl_rl
 from rsl_rl.algorithms import Distillation
 from rsl_rl.env import VecEnv
 from rsl_rl.modules import MultiStudentTeacher
 from rsl_rl.runners import OnPolicyRunner
-from rsl_rl.utils import resolve_obs_groups, store_code_state
+from rsl_rl.utils import resolve_obs_groups, store_code_state, tensor_to_obs_groups
 
 
 class DistillationRunner(OnPolicyRunner):
@@ -36,9 +45,15 @@ class DistillationRunner(OnPolicyRunner):
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 
+        # Logging
+        self.log_dir = log_dir
+        self.writer = None
+        self.logger_type = self.cfg.get("logger_type", "none")
+
         # Query observations from environment for algorithm construction
-        obs = self.env.get_observations()
-        self.cfg["obs_groups"] = resolve_obs_groups(obs, self.cfg["obs_groups"], default_sets=["teacher"])
+        raw_obs = self.env.get_observations()
+        obs, self.cfg["obs_groups"] = resolve_obs_groups(raw_obs, self.cfg["obs_groups"], default_sets=["teacher"])
+        obs = obs.to(self.device)
 
         # Create the algorithm
         self.alg = self._construct_algorithm(obs)
@@ -47,13 +62,76 @@ class DistillationRunner(OnPolicyRunner):
         # Note: We only log from the process with rank 0 (main process)
         self.disable_logs = self.is_distributed and self.gpu_global_rank != 0
 
-        # Logging
-        self.log_dir = log_dir
-        self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
         self.git_status_repos = [rsl_rl.__file__]
+
+    def _configure_multi_gpu(self) -> None:
+        if dist.is_available() and dist.is_initialized():
+            self.is_distributed = False
+            self.gpu_global_rank = dist.get_rank()
+            self.gpu_world_size = dist.get_world_size()
+            self.multi_gpu_cfg = {"global_rank": self.gpu_global_rank, "world_size": self.gpu_world_size}
+        else:
+            self.is_distributed = False
+            self.gpu_global_rank = 0
+            self.gpu_world_size = 1
+            self.multi_gpu_cfg = None
+
+    def _prepare_logging_writer(self) -> None:
+        if self.disable_logs or self.writer is not None:
+            return
+        if self.logger_type == "tensorboard" and self.log_dir and SummaryWriter is not None:
+            self.writer = SummaryWriter(self.log_dir, flush_secs=10)
+        elif self.logger_type in {"wandb", "neptune"}:
+            print("⚠️  Wandb/Neptune logging is not implemented for DistillationRunner; disabling remote logger.")
+            self.logger_type = "none"
+
+    def train_mode(self) -> None:
+        self.alg.policy.train()
+
+    def eval_mode(self) -> None:
+        self.alg.policy.eval()
+
+    def save(self, path: str, infos=None) -> None:  # noqa: D401 (compat signature)
+        state = {
+            "policy_state_dict": self.alg.policy.state_dict(),
+            "optimizer_state_dict": self.alg.optimizer.state_dict(),
+            "iter": self.current_learning_iteration,
+            "infos": infos,
+        }
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(state, path)
+
+    def log(self, locs, width: int = 80, pad: int = 35) -> None:  # noqa: D401 (compat signature)
+        behavior_loss = locs["loss_dict"].get("behavior", 0.0)
+        self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+        iteration_time = locs["collection_time"] + locs["learn_time"]
+        self.tot_time += iteration_time
+        fps = int(self.num_steps_per_env * self.env.num_envs / max(iteration_time, 1e-6))
+
+        mean_reward = statistics.mean(locs["rewbuffer"]) if locs["rewbuffer"] else 0.0
+        mean_ep_len = statistics.mean(locs["lenbuffer"]) if locs["lenbuffer"] else 0.0
+
+        if self.writer and self.logger_type == "tensorboard":
+            step = locs["it"]
+            self.writer.add_scalar("loss/behavior", behavior_loss, step)
+            self.writer.add_scalar("reward/mean", mean_reward, step)
+            self.writer.add_scalar("episode/length", mean_ep_len, step)
+            self.writer.add_scalar("perf/fps", fps, step)
+
+        ep_string = ""
+        if locs["ep_infos"]:
+            sample = locs["ep_infos"][0]
+            for key in sample:
+                values = torch.tensor([info[key] for info in locs["ep_infos"]], dtype=torch.float32)
+                value = float(values.mean())
+                ep_string += f"{('Mean episode ' + key + ':'):>{pad}} {value:.4f}\n"
+
+        header = f" \033[1m Learning iteration {locs['it']} / {locs['num_learning_iterations']} \033[0m "
+        log_lines = ["#" * width, header.center(width), "", f"{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)", f"{'Behavior loss:':>{pad}} {behavior_loss:.4f}", f"{'Mean reward:':>{pad}} {mean_reward:.2f}", f"{'Mean episode length:':>{pad}} {mean_ep_len:.2f}", "-" * width, ep_string, f"{'Total timesteps:':>{pad}} {self.tot_timesteps}", f"{'Iteration time:':>{pad}} {iteration_time:.2f}s", f"{'Total time:':>{pad}} {self.tot_time:.2f}s"]
+        print("\n".join([line for line in log_lines if line]))
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
         # Initialize writer
@@ -69,15 +147,15 @@ class DistillationRunner(OnPolicyRunner):
             )
 
         # Start learning
-        obs = self.env.get_observations().to(self.device)
+        obs = tensor_to_obs_groups(self.env.get_observations(), self.cfg["obs_groups"]).to(self.device)
         self.train_mode()  # switch to train mode (for dropout for example)
         
         # Book keeping
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
-        cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-        cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_reward_sum = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
+        cur_episode_length = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
 
         # Ensure all parameters are in-synced
         if self.is_distributed:
@@ -95,9 +173,11 @@ class DistillationRunner(OnPolicyRunner):
                     # Sample actions
                     actions = self.alg.act(obs)
                     # Step the environment
-                    obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
-                    # Move to device
-                    obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
+                    obs_tensor, _, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+                    # Move to device and wrap observations
+                    obs = tensor_to_obs_groups(obs_tensor, self.cfg["obs_groups"]).to(self.device)
+                    rewards = rewards.to(self.device).unsqueeze(-1)
+                    dones = dones.to(self.device).unsqueeze(-1)
                     # Process the step
                     self.alg.process_env_step(obs, rewards, dones, extras)
                     # Book keeping
@@ -111,11 +191,11 @@ class DistillationRunner(OnPolicyRunner):
                         # Update episode length
                         cur_episode_length += 1
                         # Clear data for completed episodes
-                        new_ids = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-                        cur_reward_sum[new_ids] = 0
-                        cur_episode_length[new_ids] = 0
+                        done_envs = (dones > 0).nonzero(as_tuple=False)
+                        rewbuffer.extend(cur_reward_sum[done_envs][:, 0].cpu().numpy().tolist())
+                        lenbuffer.extend(cur_episode_length[done_envs][:, 0].cpu().numpy().tolist())
+                        cur_reward_sum[done_envs] = 0
+                        cur_episode_length[done_envs] = 0
 
                 stop = time.time()
                 collection_time = stop - start

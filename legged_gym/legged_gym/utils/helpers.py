@@ -212,6 +212,9 @@ def get_args():
         {"name": "--use_double_critic", "action": "store_true", "default": True, "help": "use double critic"},
         {"name": "--stage", "type": str, "default": "auto", "help": "stage"},
         {"name": "--proj_name", "type": str, "default": "beamdojo", "help": "proj_name"},
+        {"name": "--teacher_checkpoint", "type": str, "help": "Path to the trained teacher checkpoint for distillation."},
+        {"name": "--student_checkpoint", "type": str, "help": "Optional student checkpoint to resume distillation."},
+        {"name": "--distill_iters", "type": int, "help": "Number of distillation iterations to run."},
     
     ]
     

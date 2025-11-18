@@ -3,13 +3,54 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 from tensordict import TensorDict
 
 from rsl_rl.modules import MultiStudentTeacher
-from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import resolve_optimizer
+
+
+@dataclass
+class DistillationTransition:
+    observations: TensorDict | None = None
+    privileged_actions: torch.Tensor | None = None
+    actions: torch.Tensor | None = None
+    rewards: torch.Tensor | None = None
+    dones: torch.Tensor | None = None
+
+    def clear(self) -> None:
+        self.observations = None
+        self.privileged_actions = None
+        self.actions = None
+        self.rewards = None
+        self.dones = None
+
+
+class DistillationStorage:
+    def __init__(self, num_envs: int, num_transitions_per_env: int, device: str) -> None:
+        self.num_envs = num_envs
+        self.num_transitions_per_env = num_transitions_per_env
+        self.device = device
+        self.clear()
+
+    def add_transition(self, transition: DistillationTransition) -> None:
+        if transition.observations is None or transition.privileged_actions is None or transition.dones is None:
+            raise RuntimeError("Incomplete transition passed to DistillationStorage.")
+        self.observations.append(transition.observations.clone())
+        self.teacher_actions.append(transition.privileged_actions.clone())
+        self.dones.append(transition.dones.clone())
+
+    def generator(self):
+        for obs, teacher_act, dones in zip(self.observations, self.teacher_actions, self.dones):
+            yield obs, None, teacher_act, dones
+
+    def clear(self) -> None:
+        self.observations: list[TensorDict] = []
+        self.teacher_actions: list[torch.Tensor] = []
+        self.dones: list[torch.Tensor] = []
 
 
 class Distillation:
@@ -46,13 +87,13 @@ class Distillation:
         # Distillation components
         self.policy = policy
         self.policy.to(self.device)
-        self.storage = None  # Initialized later
+        self.storage: DistillationStorage | None = None
 
         # Initialize the optimizer
         self.optimizer = resolve_optimizer(optimizer)(self.policy.parameters(), lr=learning_rate)
 
         # Initialize the transition
-        self.transition = RolloutStorage.Transition()
+        self.transition = DistillationTransition()
         self.last_hidden_states = (None, None)
 
         # Distillation parameters
@@ -82,14 +123,7 @@ class Distillation:
         actions_shape: tuple[int],
     ) -> None:
         # Create rollout storage
-        self.storage = RolloutStorage(
-            training_type,
-            num_envs,
-            num_transitions_per_env,
-            obs,
-            actions_shape,
-            self.device,
-        )
+        self.storage = DistillationStorage(num_envs, num_transitions_per_env, self.device)
 
     def act(self, obs: TensorDict) -> torch.Tensor:
         # Compute the actions
@@ -109,7 +143,9 @@ class Distillation:
         self.transition.rewards = rewards
         self.transition.dones = dones
         # Record the transition
-        self.storage.add_transitions(self.transition)
+        if self.storage is None:
+            raise RuntimeError("Storage not initialized. Call init_storage before collecting data.")
+        self.storage.add_transition(self.transition)
         self.transition.clear()
         self.policy.reset(dones)
 
@@ -122,6 +158,8 @@ class Distillation:
         for epoch in range(self.num_learning_epochs):
             self.policy.reset(hidden_states=self.last_hidden_states)
             self.policy.detach_hidden_states()
+            if self.storage is None:
+                raise RuntimeError("Storage not initialized. Call init_storage before calling update().")
             for obs, _, privileged_actions, dones in self.storage.generator():
                 # Inference of the student for gradient computation
                 actions = self.policy.act_inference(obs)
@@ -151,7 +189,8 @@ class Distillation:
                 self.policy.detach_hidden_states(dones.view(-1))
 
         mean_behavior_loss /= cnt
-        self.storage.clear()
+        if self.storage is not None:
+            self.storage.clear()
         self.last_hidden_states = self.policy.get_hidden_states()
         self.policy.detach_hidden_states()
 
