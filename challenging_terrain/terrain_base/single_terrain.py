@@ -917,3 +917,144 @@ class single_terrain:
                     goals[i] = last_goal
         
         return terrain, goals, bridge_end_x
+    
+    def stepping_stones(terrain,
+                        length_x=18.0,
+                        length_y=4.0,
+                        num_goals=8,
+                        start_x=0,
+                        start_y=0,
+                        platform_size=1.0,
+                        difficulty=0.5,
+                        stone_sizes=[0.8, 0.65, 0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.2],  # 石头尺寸序列（米）
+                        lateral_gap_range=[0.1, 0.3],   # 左右石块之间的间隙范围（米）
+                        pit_depth=1.0,                  # 深坑深度（米）
+                        ):
+        """
+        梅花桩地形：左右脚分别踩在对应的小平台上前进
+        - 两排小平台，左边一排给左脚，右边一排给右脚
+        - 目标点设在中间
+        - 参考 BeamDojo Stepping Stones:
+          - 石头尺寸序列: [0.8, 0.65, 0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.2]
+          - 前后石头间距: 0.1 + 0.05*l (l为难度等级0-8)
+          - 左右间距随难度增加而增大
+        """
+        goals = np.zeros((num_goals, 2))
+        
+        # 转换基本参数为网格单位
+        length_x_grid = round(length_x / terrain.horizontal_scale)
+        length_y_grid = round(length_y / terrain.horizontal_scale)
+        platform_size_grid = round(platform_size / terrain.horizontal_scale)
+        pit_depth_grid = round(pit_depth / terrain.vertical_scale)
+        
+        # 计算Y方向中心线
+        mid_y = start_y + length_y_grid // 2
+        
+        # === 难度参数：根据 difficulty (0-1) 选择石头尺寸和间距 ===
+        # difficulty 映射到难度等级 l (0-8)
+        level = int(difficulty * (len(stone_sizes) - 1))
+        level = min(level, len(stone_sizes) - 1)
+        
+        # 当前难度对应的石头尺寸
+        stone_size = stone_sizes[level]
+        stone_size_grid = round(stone_size / terrain.horizontal_scale)
+        
+        # 前后石头间距：0.1 + 0.05*l (随难度增加而增大)
+        stone_gap = 0.1 + 0.05 * level
+        stone_gap_grid = round(stone_gap / terrain.horizontal_scale)
+        
+        # 左右间距：随难度增加而增大（难度0时最小，难度1时最大）
+        lateral_gap = (lateral_gap_range[1] - lateral_gap_range[0]) * difficulty + lateral_gap_range[0]
+        lateral_gap_grid = round(lateral_gap / terrain.horizontal_scale)
+        
+        # === 第1步: 先将整个区域填充为深坑(背景) ===
+        terrain.height_field_raw[start_x:start_x + length_x_grid, 
+                                start_y:start_y + length_y_grid] = -pit_depth_grid
+        
+        # === 第2步: 创建起始平台(完整宽度的平地) ===
+        terrain.height_field_raw[start_x:start_x + platform_size_grid, 
+                                start_y:start_y + length_y_grid] = 0
+        
+        # === 第3步: 创建梅花桩（左右分开的小平台，呈"之"字形）===
+        current_x = start_x + platform_size_grid
+        
+        # 计算左右石块的Y坐标（中间有间隙lateral_gap）
+        # 左石块在中线左侧，右石块在中线右侧，中间保持间隙
+        left_stone_y_center = mid_y - lateral_gap_grid // 2 - stone_size_grid // 2
+        right_stone_y_center = mid_y + lateral_gap_grid // 2 + stone_size_grid // 2
+        
+        # 第一遍：生成所有石块并记录位置
+        stone_positions = []
+        temp_x = current_x
+        while temp_x < start_x + length_x_grid:
+            # 检查是否还有足够空间放置石块
+            if temp_x + stone_size_grid > start_x + length_x_grid:
+                break
+            
+            # 记录石块位置
+            stone_positions.append(temp_x)
+            
+            # 移动到下一组石块位置
+            temp_x += stone_size_grid + stone_gap_grid
+        
+        # 计算目标点应该放置在哪些石块上（均匀分布）
+        num_stones = len(stone_positions)
+        goal_stone_indices = []
+        if num_stones > 0:
+            if num_stones >= num_goals:
+                # 石块数量足够：均匀分布目标点
+                for i in range(num_goals):
+                    stone_idx = int(i * (num_stones - 1) / max(1, num_goals - 1)) if num_goals > 1 else 0
+                    goal_stone_indices.append(stone_idx)
+            else:
+                # 石块数量不足：每个石块放一个目标点
+                for i in range(min(num_goals, num_stones)):
+                    goal_stone_indices.append(i)
+        
+        # 第二遍：创建石块并在指定位置放置目标点
+        goal_idx = 0
+        for stone_idx, stone_x in enumerate(stone_positions):
+            # 计算左右石块的Y坐标（以各自中心为基准，确保中间有间隙）
+            left_stone_y = left_stone_y_center - stone_size_grid // 2
+            right_stone_y = right_stone_y_center - stone_size_grid // 2
+            
+            # 确保石块Y坐标在有效范围内
+            left_stone_y = max(start_y, min(left_stone_y, start_y + length_y_grid - stone_size_grid))
+            right_stone_y = max(start_y, min(right_stone_y, start_y + length_y_grid - stone_size_grid))
+            
+            # 创建左脚石块（X位置相同，只在Y方向分开）
+            left_stone_end_x = min(stone_x + stone_size_grid, start_x + length_x_grid)
+            left_stone_end_y = min(left_stone_y + stone_size_grid, start_y + length_y_grid)
+            if left_stone_end_x > stone_x and left_stone_end_y > left_stone_y:
+                terrain.height_field_raw[stone_x:left_stone_end_x, 
+                                        left_stone_y:left_stone_end_y] = 0
+            
+            # 创建右脚石块（X位置相同，只在Y方向分开，中间保持间隙）
+            right_stone_end_x = min(stone_x + stone_size_grid, start_x + length_x_grid)
+            right_stone_end_y = min(right_stone_y + stone_size_grid, start_y + length_y_grid)
+            if right_stone_end_x > stone_x and right_stone_end_y > right_stone_y:
+                terrain.height_field_raw[stone_x:right_stone_end_x, 
+                                        right_stone_y:right_stone_end_y] = 0
+            
+            # 检查是否应该在这个石块上放置目标点
+            if goal_idx < num_goals and goal_idx < len(goal_stone_indices) and stone_idx == goal_stone_indices[goal_idx]:
+                # 将目标点放在左右石块的中间边缘位置
+                # X坐标：在石块中心
+                goal_x = stone_x + stone_size_grid // 2
+                # Y坐标：左石块的右边缘，紧贴间隙，这样目标点在石块上而不是深坑里
+                goal_y = left_stone_y + stone_size_grid  
+                goals[goal_idx] = [goal_x, goal_y]
+                goal_idx += 1
+        
+        # 如果目标点不足（不应该发生），补齐到num_goals
+        if goal_idx < num_goals:
+            print(f"Warning: Only generated {goal_idx}/{num_goals} goals in stepping_stones terrain")
+            if goal_idx > 0:
+                last_goal = goals[goal_idx - 1]
+                for i in range(goal_idx, num_goals):
+                    goals[i] = last_goal
+            else:
+                for i in range(num_goals):
+                    goals[i] = [start_x + platform_size_grid // 2, mid_y]
+        
+        return terrain, goals, start_x + length_x_grid

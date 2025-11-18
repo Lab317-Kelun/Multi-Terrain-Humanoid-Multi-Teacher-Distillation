@@ -24,6 +24,7 @@ class combine_config:
                 single_terrain.flat_Stones_Everywhere, #11
                 single_terrain.flat_Stones_Middle_Start, #12
                 single_terrain.bridge_gap,   #13
+                single_terrain.stepping_stones,   #14
         ]
 
         multiplication = [
