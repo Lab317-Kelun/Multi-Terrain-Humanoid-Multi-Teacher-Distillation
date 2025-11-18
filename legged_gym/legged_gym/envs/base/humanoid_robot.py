@@ -652,7 +652,7 @@ class HumanoidRobot(BaseTask):
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
                             self.action_history_buf[:, -1, :12], # R^{12}
                             # phase_obs,               # R^2 (sin_phase, cos_phase) - 步态相位信息
-                            self.contact_filt.float(), # 2 接触信息
+                            # self.contact_filt.float(), # 2 接触信息
                             ), dim=-1)
         
         priv_explicit = self.base_lin_vel * self.obs_scales.lin_vel

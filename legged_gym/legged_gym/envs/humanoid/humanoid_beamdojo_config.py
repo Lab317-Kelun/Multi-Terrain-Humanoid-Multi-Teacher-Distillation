@@ -61,7 +61,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 77  # 实际obs_buf维度：3(commands)+3(ang_vel)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=75
+        n_proprio = 75  # 实际obs_buf维度：3(commands)+3(ang_vel)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=75
         history_len = 10
         
         # 重新计算总观测维度
