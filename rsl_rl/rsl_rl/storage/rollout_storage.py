@@ -50,16 +50,19 @@ class RolloutStorage:
             self.rewards_dense = None
             self.rewards_sparse = None
             self.values_sparse = None
+            # AMP相关
+            self.disc_obs = None
         def clear(self):
             self.__init__()
 
-    def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, device='cpu'):
+    def __init__(self, num_envs, num_transitions_per_env, obs_shape, privileged_obs_shape, actions_shape, device='cpu', disc_obs_shape=None):
 
         self.device = device
 
         self.obs_shape = obs_shape
         self.privileged_obs_shape = privileged_obs_shape
         self.actions_shape = actions_shape
+        self.disc_obs_shape = disc_obs_shape
 
         # Core
         self.observations = torch.zeros(num_transitions_per_env, num_envs, *obs_shape, device=self.device)
@@ -89,6 +92,13 @@ class RolloutStorage:
         self.returns_sparse = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
         self.advantages_dense = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
         self.advantages_sparse = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
+        
+        # AMP Discriminator观测存储
+        if disc_obs_shape is not None:
+            self.disc_obs = torch.zeros(num_transitions_per_env, num_envs, *disc_obs_shape, device=self.device)
+            print(f"[RolloutStorage] 已创建disc_obs存储，形状: {self.disc_obs.shape}")
+        else:
+            self.disc_obs = None
 
         self.num_transitions_per_env = num_transitions_per_env
         self.num_envs = num_envs
@@ -129,6 +139,10 @@ class RolloutStorage:
         else:
             self.values_dense[self.step].copy_(transition.values)
             self.values_sparse[self.step].fill_(0.0)
+        
+        # AMP disc_obs数据
+        if hasattr(transition, 'disc_obs') and transition.disc_obs is not None and self.disc_obs is not None:
+            self.disc_obs[self.step].copy_(transition.disc_obs)
 
         self._save_hidden_states(transition.hidden_states)
         self.step += 1

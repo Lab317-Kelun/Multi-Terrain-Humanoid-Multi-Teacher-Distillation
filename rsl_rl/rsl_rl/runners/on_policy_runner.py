@@ -42,11 +42,8 @@ import datetime
 
 from rsl_rl.algorithms import PPO
 from rsl_rl.algorithms import PPOMirror
-# 导入BEAMDOJO双Critic算法
-try:
-    from rsl_rl.algorithms.ppo_double_reward import PPODoubleReward
-except ImportError:
-    PPODoubleReward = None
+from rsl_rl.algorithms.ppo_double_reward import PPODoubleReward
+from rsl_rl.algorithms.ppo_double_reward_amp import PPODoubleRewardAMP
 from rsl_rl.modules import *
 from rsl_rl.env import VecEnv
 import sys
@@ -78,18 +75,48 @@ class OnPolicyRunner:
             from rsl_rl.modules.actor_critic import ActorCriticRMADoubleReward
             actor_critic_class = ActorCriticRMADoubleReward
             print(f"Using {policy_class_name} for BEAMDOJO double critic")
+        elif policy_class_name == "ActorCriticRMADoubleRewardAMP":
+            from rsl_rl.modules.actor_critic_amp import ActorCriticRMADoubleRewardAMP
+            actor_critic_class = ActorCriticRMADoubleRewardAMP
+            print(f"Using {policy_class_name} for BEAMDOJO + AMP")
         else:
             actor_critic_class = ActorCriticRMA
             print(f"Using default {policy_class_name}")
+        
+        # 检查是否需要disc_obs_size（AMP模型需要）
+        disc_obs_size = None
+        if policy_class_name == "ActorCriticRMADoubleRewardAMP":
+            if hasattr(self.env, 'disc_obs_size'):
+                disc_obs_size = self.env.disc_obs_size
+                print(f"[AMP] Discriminator观测维度: {disc_obs_size}")
+            else:
+                print("[AMP] Warning: 环境没有disc_obs_size属性，AMP将被禁用")
             
-        actor_critic = actor_critic_class(self.env.cfg.env.n_proprio,
-                                          self.env.cfg.env.n_scan,
-                                          self.env.num_obs,
-                                          self.env.cfg.env.n_priv_latent,
-                                          self.env.cfg.env.n_priv,
-                                          self.env.cfg.env.history_len,
-                                          self.env.num_actions,
-                                          **self.policy_cfg).to(self.device)
+        # 创建actor-critic模型
+        # 对于RMA类模型（包括AMP），使用特殊的参数结构
+        if 'RMA' in policy_class_name or policy_class_name == "ActorCriticRMADoubleRewardAMP":
+            actor_critic_kwargs = {
+                'num_prop': self.env.cfg.env.n_proprio,
+                'num_scan': self.env.cfg.env.n_scan,
+                'num_critic_obs': self.env.num_obs,
+                'num_priv_latent': self.env.cfg.env.n_priv_latent,
+                'num_priv_explicit': self.env.cfg.env.n_priv,
+                'num_hist': self.env.cfg.env.history_len,
+                'num_actions': self.env.num_actions,
+                **self.policy_cfg
+            }
+            # 如果是AMP模型，添加disc_obs_size
+            if policy_class_name == "ActorCriticRMADoubleRewardAMP" and disc_obs_size is not None:
+                actor_critic_kwargs['disc_obs_size'] = disc_obs_size
+        else:
+            actor_critic_kwargs = {
+                'num_actor_obs': self.env.cfg.env.n_proprio,
+                'num_critic_obs': self.env.num_obs,
+                'num_actions': self.env.num_actions,
+                **self.policy_cfg
+            }
+            
+        actor_critic = actor_critic_class(**actor_critic_kwargs).to(self.device)
         #estimator = Estimator(input_dim=env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv, hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
         estimator = Estimator(input_dim=env.cfg.env.history_len * env.cfg.env.n_proprio, output_dim=env.cfg.env.n_priv, hidden_dims=self.estimator_cfg["hidden_dims"]).to(self.device)
         # Depth encoder
@@ -129,21 +156,41 @@ class OnPolicyRunner:
         # self.depth_encoder_criterion = nn.MSELoss()
         # Create algorithm
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg: PPO = alg_class(actor_critic, 
-                                  estimator, self.estimator_cfg, 
-                                  depth_encoder, self.depth_encoder_cfg, depth_actor,
-                                  device=self.device, **self.alg_cfg)
+        
+        # 如果是AMP算法，需要传递环境引用用于expert demonstration采样
+        if self.cfg["algorithm_class_name"] == "PPODoubleRewardAMP":
+            self.alg: PPO = alg_class(actor_critic, 
+                                      vec_env=self.env,  # 传递环境引用
+                                      estimator=estimator, 
+                                      estimator_cfg=self.estimator_cfg, 
+                                      depth_encoder=depth_encoder, 
+                                      depth_encoder_cfg=self.depth_encoder_cfg, 
+                                      depth_actor=depth_actor,
+                                      device=self.device, **self.alg_cfg)
+        else:
+            self.alg: PPO = alg_class(actor_critic, 
+                                      estimator, self.estimator_cfg, 
+                                      depth_encoder, self.depth_encoder_cfg, depth_actor,
+                                      device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
         self.dagger_update_freq = self.alg_cfg["dagger_update_freq"]
 
-        self.alg.init_storage(
-            self.env.num_envs, 
-            self.num_steps_per_env, 
-            [self.env.num_obs], 
-            [self.env.num_privileged_obs], 
-            [self.env.num_actions],
-        )
+        # 准备init_storage参数
+        storage_kwargs = {
+            'num_envs': self.env.num_envs,
+            'num_transitions_per_env': self.num_steps_per_env,
+            'actor_obs_shape': [self.env.num_obs],
+            'critic_obs_shape': [self.env.num_privileged_obs],
+            'action_shape': [self.env.num_actions],
+        }
+        
+        # 如果是AMP，添加disc_obs_shape
+        if policy_class_name == "ActorCriticRMADoubleRewardAMP" and disc_obs_size is not None:
+            storage_kwargs['disc_obs_shape'] = [disc_obs_size]
+            print(f"[AMP] Storage将包含disc_obs，形状: {[disc_obs_size]}")
+            
+        self.alg.init_storage(**storage_kwargs)
 
         self.learn = self.learn_RL if not self.if_depth else self.learn_vision
             
@@ -484,7 +531,7 @@ class OnPolicyRunner:
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
-        wandb_dict['Loss/value_function'] = ['mean_value_loss']
+        wandb_dict['Loss/value_function'] = locs['mean_value_loss']
         wandb_dict['Loss/surrogate'] = locs['mean_surrogate_loss']
         wandb_dict['Loss/estimator'] = locs['mean_estimator_loss']
         wandb_dict['Loss/hist_latent_loss'] = locs['mean_hist_latent_loss']
@@ -492,8 +539,32 @@ class OnPolicyRunner:
         wandb_dict['Loss/priv_ref_lambda'] = locs['priv_reg_coef']
         wandb_dict['Loss/entropy_coef'] = locs['entropy_coef']
         wandb_dict['Loss/learning_rate'] = self.alg.learning_rate
-        wandb_dict['Loss/discriminator'] = locs['mean_disc_loss']
-        wandb_dict['Loss/discriminator_accuracy'] = locs['mean_disc_acc']
+        
+        # Discriminator loss (可能来自AMP)
+        if 'mean_discriminator_loss' in locs:
+            wandb_dict['Loss/discriminator'] = locs['mean_discriminator_loss']
+            wandb_dict['Loss/discriminator_accuracy'] = locs['mean_discriminator_acc']
+        elif 'mean_disc_loss' in locs:
+            wandb_dict['Loss/discriminator'] = locs['mean_disc_loss']
+            wandb_dict['Loss/discriminator_accuracy'] = locs['mean_disc_acc']
+        
+        # 双Critic的额外loss
+        if 'mean_value_loss_dense' in locs:
+            wandb_dict['Loss/value_function_dense'] = locs['mean_value_loss_dense']
+        if 'mean_value_loss_sparse' in locs:
+            wandb_dict['Loss/value_function_sparse'] = locs['mean_value_loss_sparse']
+        
+        # AMP相关指标
+        if hasattr(self.alg, 'amp_metrics'):
+            amp_metrics = self.alg.amp_metrics
+            wandb_dict['AMP/disc_loss'] = amp_metrics.get('disc_loss', 0.0)
+            wandb_dict['AMP/disc_grad_penalty'] = amp_metrics.get('disc_grad_penalty', 0.0)
+            wandb_dict['AMP/disc_agent_acc'] = amp_metrics.get('disc_agent_acc', 0.0)
+            wandb_dict['AMP/disc_demo_acc'] = amp_metrics.get('disc_demo_acc', 0.0)
+            wandb_dict['AMP/disc_agent_logit'] = amp_metrics.get('disc_agent_logit', 0.0)
+            wandb_dict['AMP/disc_demo_logit'] = amp_metrics.get('disc_demo_logit', 0.0)
+            wandb_dict['AMP/task_reward_mean'] = amp_metrics.get('task_reward_mean', 0.0)
+            wandb_dict['AMP/amp_reward_mean'] = amp_metrics.get('amp_reward_mean', 0.0)
 
         wandb_dict['Policy/mean_noise_std'] = mean_std.item()
         wandb_dict['Perf/total_fps'] = fps

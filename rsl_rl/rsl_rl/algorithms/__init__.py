@@ -32,3 +32,4 @@ from .ppo import PPO
 from .mirror import Mirror
 from .ppo_mirror import PPOMirror
 from .ppo_double_reward import PPODoubleReward
+from .ppo_double_reward_amp import PPODoubleRewardAMP
