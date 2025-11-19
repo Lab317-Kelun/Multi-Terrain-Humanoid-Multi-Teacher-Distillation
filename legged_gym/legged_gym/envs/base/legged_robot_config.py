@@ -56,7 +56,7 @@ class LeggedRobotCfg(BaseConfig):
 
         history_encoding = True
         reorder_dofs = True
-        
+        use_double_critic = True
         
         # action_delay_range = [0, 5]
 
@@ -248,10 +248,6 @@ class LeggedRobotCfg(BaseConfig):
         base_height_target = 1.
         max_contact_force = 40. # forces above this value are penalized
 
-
-
-
-
     # viewer camera:
     class viewer:
         ref_env = 0
@@ -284,7 +280,12 @@ class LeggedRobotCfgPPO(BaseConfig):
     class policy:
         init_noise_std = 1.0
         continue_from_last_std = True
+        scan_encoder_type = 'mlp'  # 可选: 'mlp', 'cnn', 'none'
         scan_encoder_dims = [128, 64, 32]
+        scan_cnn_channels = [128, 96, 64]
+        scan_cnn_kernel_sizes = [7, 5, 3]
+        scan_cnn_strides = [2, 2, 1]
+        scan_encoder_debug = False
         actor_hidden_dims = [512, 256, 128]
         critic_hidden_dims = [512, 256, 128]
         priv_encoder_dims = [64, 20]
