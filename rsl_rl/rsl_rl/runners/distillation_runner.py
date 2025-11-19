@@ -188,7 +188,17 @@ class DistillationRunner(OnPolicyRunner):
             for k, v in log_dict.items():
                 self.writer.add_scalar(k, v, self.tot_timesteps)
 
-        print(f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m ")
+        current_iter = locs.get("it", self.current_learning_iteration)
+        start_iter = locs.get("start_iter", 0)
+        planned_iterations = locs.get("num_learning_iterations")
+        if planned_iterations is None:
+            total_iterations = locs.get("total_iterations")
+            if total_iterations is not None:
+                planned_iterations = max(total_iterations - start_iter, 0)
+        if not planned_iterations:
+            planned_iterations = current_iter - start_iter + 1
+        relative_iter = current_iter - start_iter + 1
+        print(f" \033[1m Learning iteration {relative_iter}/{planned_iterations} \033[0m ")
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
         # Initialize writer
