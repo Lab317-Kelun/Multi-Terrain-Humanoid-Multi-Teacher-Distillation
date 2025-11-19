@@ -64,11 +64,24 @@ class HumanoidBEAMDOJOAMPCfg(LeggedRobotCfg):
         n_proprio = 75  # 实际obs_buf维度
         history_len = 10
         
+        use_double_critic = True
+        
         # AMP相关配置
         enable_amp = True                    # 启用AMP
         num_disc_obs_steps = 10              # discriminator观测的历史步数
         amp_motion_files = ['/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/data/g1_walk.pkl'] 
         amp_replay_buffer_size = 100000      # AMP replay buffer大小
+        
+        # AMP观测坐标系配置（参考MimicKit）
+        amp_global_obs = False               # False: 使用heading坐标系（局部，只考虑yaw旋转）
+                                             # True: 使用全局坐标系
+                                             # 推荐：False（局部坐标系，更稳定）
+        amp_root_height_obs = True           # True: root位置包含z坐标（高度）
+                                             # False: root位置只包含x, y坐标
+                                             # 推荐：True（包含高度信息）
+        
+        # 调试配置
+        debug_amp_obs = True                 # 启用AMP观测调试信息（观测维度、数值范围等）
         
         # 重新计算总观测维度
         num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv
@@ -223,7 +236,14 @@ class HumanoidBEAMDOJOAMPCfg(LeggedRobotCfg):
         ankle_sole_distance = 0.02
         
         # AMP关键身体部位（用于discriminator观测）
-        key_bodies = ["torso_link", "left_hand_palm_link", "right_hand_palm_link", 
+        # 只使用下半身关键部位，不包含上半身（手部）
+        # - torso_link: 躯干中心（作为参考点）
+        # - left_hip_yaw_link, right_hip_yaw_link: 髋部位置（重要步态特征）
+        # - left_knee_link, right_knee_link: 膝盖位置（重要步态特征）
+        # - left_ankle_roll_link, right_ankle_roll_link: 脚踝位置（接触点）
+        key_bodies = ["torso_link", 
+                     "left_hip_yaw_link", "right_hip_yaw_link",
+                     "left_knee_link", "right_knee_link",
                      "left_ankle_roll_link", "right_ankle_roll_link"]
         
     class commands( LeggedRobotCfg.commands ):
@@ -265,12 +285,12 @@ class HumanoidBEAMDOJOAMPCfg(LeggedRobotCfg):
             deviation_knee_joint = -0.75
             dof_acc = -2.5e-7
             dof_pos_limits = -2.
-            feet_air_time = 1.0
-            feet_clearance = -3.0
+            feet_air_time = 0.05
+            feet_clearance = -0.25
             feet_distance_lateral = 0.5  
             knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
-            feet_parallel = -0.0
+            feet_parallel = -3.0
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
@@ -298,12 +318,12 @@ class HumanoidBEAMDOJOAMPCfg(LeggedRobotCfg):
         soft_torque_limit = 0.95
         base_height_target = 0.74
         max_contact_force = 400.
-        least_feet_distance = 0.18
-        least_feet_distance_lateral = 0.18
-        most_feet_distance_lateral = 0.25
-        most_knee_distance_lateral = 0.25
-        least_knee_distance_lateral = 0.18
-        clearance_height_target = 0.18
+        least_feet_distance = 0.2
+        least_feet_distance_lateral = 0.2
+        most_feet_distance_lateral = 0.35
+        most_knee_distance_lateral = 0.35
+        least_knee_distance_lateral = 0.2
+        clearance_height_target = 0.14
         is_play = False
         
         foothold_foot_length = 0.12
@@ -415,28 +435,25 @@ class HumanoidBEAMDOJOAMPCfgPPO(LeggedRobotCfgPPO):
         dense_reward_weight = 1.0
         sparse_reward_weight = 0.25
         
-        # ====== AMP discriminator配置 ======
+        # ====== AMP discriminator配置（完全对齐MimicKit标准）=====
         enable_amp = True                      # 启用AMP
-        disc_hidden_dims = [512, 256]         # discriminator隐藏层
-        disc_learning_rate = 5e-5              # discriminator学习率
-        disc_loss_weight = 5.0                 # discriminator损失权重
-        disc_logit_reg = 0.01                  # logit正则化
-        disc_grad_penalty = 5.0                # 梯度惩罚
-        disc_weight_decay = 0.0001             # 权重衰减
-        disc_reward_scale = 2.0                # discriminator奖励缩放
-        disc_eval_batch_size = 4096            # 评估batch大小
+        disc_hidden_dims = [1024, 512]         # discriminator隐藏层（MimicKit标准：fc_2layers_1024units = [1024, 512]）
+        disc_learning_rate = 5e-5              # discriminator学习率（MimicKit标准：5e-5）
+        disc_loss_weight = 5.0                 # discriminator损失权重（MimicKit标准：5.0）
+        disc_logit_reg = 0.01                  # logit正则化（MimicKit标准：0.01）
+        disc_grad_penalty = 5.0                # 梯度惩罚（MimicKit标准：5.0，WGAN-GP风格）
+        disc_weight_decay = 0.0001             # 权重衰减（MimicKit标准：0.0001）
+        disc_reward_scale = 2.0                # discriminator奖励缩放（MimicKit标准：2.0）
+        disc_eval_batch_size = 4096            # 评估batch大小（用于避免OOM）
         
-        # AMP奖励权重
-        # ⚠️ 重要：需要平衡任务奖励和AMP奖励
-        # - task_reward_weight: 控制速度跟踪、地形导航等任务奖励
-        # - disc_reward_weight: 控制运动风格奖励（是否像人走路）
-        # 如果task_reward_weight=0，机器人不会响应速度命令！
-        # 推荐配置：
-        #   - 早期训练：task_reward_weight=0.3, disc_reward_weight=0.7 (更注重风格)
-        #   - 后期训练：task_reward_weight=0.5, disc_reward_weight=0.5 (平衡)
-        #   - 任务优先：task_reward_weight=0.7, disc_reward_weight=0.3 (更注重任务)
-        task_reward_weight = 0.5               # 任务奖励权重 (BeamDojo奖励：速度跟踪、地形导航)
-        disc_reward_weight = 0.5               # AMP奖励权重 (风格奖励：自然的人形运动)
+        # 奖励权重配置（根据训练目标选择）：
+        # - 纯AMP训练（只学习风格）：task_reward_weight=0.0, disc_reward_weight=1.0
+        # - AMP+任务训练（同时学习风格和任务）：task_reward_weight=0.5, disc_reward_weight=0.5
+        task_reward_weight = 0.5               # 任务奖励权重（0.5 = 同时学习任务和风格）
+        disc_reward_weight = 0.5               # AMP奖励权重（0.5 = 同时学习任务和风格）
+        
+        # 调试配置
+        debug_amp = True                      # 启用AMP算法调试信息（normalizer、discriminator等） 
         
     class runner(LeggedRobotCfgPPO.runner):
         """训练运行器配置"""

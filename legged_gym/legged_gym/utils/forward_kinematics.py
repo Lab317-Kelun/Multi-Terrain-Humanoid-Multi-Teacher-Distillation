@@ -107,7 +107,7 @@ class G1ForwardKinematics:
     
     def compute_key_body_positions(self, root_pos, root_rot, dof_pos):
         """
-        计算关键身体部位的世界坐标位置
+        计算关键身体部位的世界坐标位置（只包含下半身）
         
         Args:
             root_pos: [batch, 3] root位置（世界坐标，pelvis）
@@ -122,15 +122,17 @@ class G1ForwardKinematics:
             20-26: 右臂 (shoulder_pitch, shoulder_roll, shoulder_yaw, elbow, wrist_roll, wrist_pitch, wrist_yaw)
             
         Returns:
-            key_body_pos: [batch, 5, 3] 关键身体部位位置
+            key_body_pos: [batch, 7, 3] 关键身体部位位置
                 0: torso (躯干中心)
-                1: left_hand (左手掌中心)
-                2: right_hand (右手掌中心)
-                3: left_foot (左脚底中心)
-                4: right_foot (右脚底中心)
+                1: left_hip_yaw_link (左髋部)
+                2: right_hip_yaw_link (右髋部)
+                3: left_knee_link (左膝盖)
+                4: right_knee_link (右膝盖)
+                5: left_ankle_roll_link (左脚踝)
+                6: right_ankle_roll_link (右脚踝)
         """
         batch_size = root_pos.shape[0]
-        key_body_pos = torch.zeros(batch_size, 5, 3, device=self.device)
+        key_body_pos = torch.zeros(batch_size, 7, 3, device=self.device)
         
         # ===== 1. Torso位置 =====
         # pelvis -> waist_yaw -> waist_roll -> torso
@@ -138,32 +140,47 @@ class G1ForwardKinematics:
         torso_pos = self._compute_torso_position(root_pos, root_rot, waist_yaw)
         key_body_pos[:, 0, :] = torso_pos
         
-        # ===== 2. 左手位置 =====
-        # torso -> shoulder_pitch -> shoulder_roll -> shoulder_yaw -> elbow -> wrist -> hand
-        left_hand_pos = self._compute_left_hand_position(
+        # ===== 2. 左髋部位置 =====
+        left_hip_pos = self._compute_left_hip_yaw_position(
             root_pos, root_rot,
-            dof_pos[:, 12],  # waist_yaw
-            dof_pos[:, 13],  # left_shoulder_pitch
-            dof_pos[:, 14],  # left_shoulder_roll
-            dof_pos[:, 15],  # left_shoulder_yaw
-            dof_pos[:, 16],  # left_elbow
+            dof_pos[:, 0],   # left_hip_pitch
+            dof_pos[:, 1],   # left_hip_roll
+            dof_pos[:, 2],   # left_hip_yaw
         )
-        key_body_pos[:, 1, :] = left_hand_pos
+        key_body_pos[:, 1, :] = left_hip_pos
         
-        # ===== 3. 右手位置 =====
-        right_hand_pos = self._compute_right_hand_position(
+        # ===== 3. 右髋部位置 =====
+        right_hip_pos = self._compute_right_hip_yaw_position(
             root_pos, root_rot,
-            dof_pos[:, 12],  # waist_yaw
-            dof_pos[:, 20],  # right_shoulder_pitch
-            dof_pos[:, 21],  # right_shoulder_roll
-            dof_pos[:, 22],  # right_shoulder_yaw
-            dof_pos[:, 23],  # right_elbow
+            dof_pos[:, 6],   # right_hip_pitch
+            dof_pos[:, 7],   # right_hip_roll
+            dof_pos[:, 8],   # right_hip_yaw
         )
-        key_body_pos[:, 2, :] = right_hand_pos
+        key_body_pos[:, 2, :] = right_hip_pos
         
-        # ===== 4. 左脚位置 =====
-        # pelvis -> hip_pitch -> hip_roll -> hip_yaw -> knee -> ankle_pitch -> ankle_roll -> foot
-        left_foot_pos = self._compute_left_foot_position(
+        # ===== 4. 左膝盖位置 =====
+        left_knee_pos = self._compute_left_knee_position(
+            root_pos, root_rot,
+            dof_pos[:, 0],   # left_hip_pitch
+            dof_pos[:, 1],   # left_hip_roll
+            dof_pos[:, 2],   # left_hip_yaw
+            dof_pos[:, 3],   # left_knee
+        )
+        key_body_pos[:, 3, :] = left_knee_pos
+        
+        # ===== 5. 右膝盖位置 =====
+        right_knee_pos = self._compute_right_knee_position(
+            root_pos, root_rot,
+            dof_pos[:, 6],   # right_hip_pitch
+            dof_pos[:, 7],   # right_hip_roll
+            dof_pos[:, 8],   # right_hip_yaw
+            dof_pos[:, 9],   # right_knee
+        )
+        key_body_pos[:, 4, :] = right_knee_pos
+        
+        # ===== 6. 左脚踝位置 =====
+        # 使用ankle_roll_link的位置（不是foot contact point）
+        left_ankle_pos = self._compute_left_ankle_roll_position(
             root_pos, root_rot,
             dof_pos[:, 0],   # left_hip_pitch
             dof_pos[:, 1],   # left_hip_roll
@@ -172,10 +189,10 @@ class G1ForwardKinematics:
             dof_pos[:, 4],   # left_ankle_pitch
             dof_pos[:, 5],   # left_ankle_roll
         )
-        key_body_pos[:, 3, :] = left_foot_pos
+        key_body_pos[:, 5, :] = left_ankle_pos
         
-        # ===== 5. 右脚位置 =====
-        right_foot_pos = self._compute_right_foot_position(
+        # ===== 7. 右脚踝位置 =====
+        right_ankle_pos = self._compute_right_ankle_roll_position(
             root_pos, root_rot,
             dof_pos[:, 6],   # right_hip_pitch
             dof_pos[:, 7],   # right_hip_roll
@@ -184,7 +201,7 @@ class G1ForwardKinematics:
             dof_pos[:, 10],  # right_ankle_pitch
             dof_pos[:, 11],  # right_ankle_roll
         )
-        key_body_pos[:, 4, :] = right_foot_pos
+        key_body_pos[:, 6, :] = right_ankle_pos
         
         return key_body_pos
     
@@ -205,6 +222,293 @@ class G1ForwardKinematics:
         torso_pos = root_pos + quat_rotate(current_rot, torso_offset)
         
         return torso_pos
+    
+    def _compute_left_hip_yaw_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw):
+        """
+        计算左髋部(hip_yaw_link)位置
+        运动学链: pelvis -> hip_pitch -> hip_roll -> hip_yaw_link
+        """
+        batch_size = root_pos.shape[0]
+        current_pos = root_pos
+        current_rot = root_rot
+        
+        # Hip pitch joint
+        offset = self.left_hip_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        pitch_rot = quat_from_angle_axis(hip_pitch, pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, pitch_rot)
+        
+        # Hip roll joint (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.left_hip_roll_rpy[0].unsqueeze(0).expand(batch_size),
+            self.left_hip_roll_rpy[1].unsqueeze(0).expand(batch_size),
+            self.left_hip_roll_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.left_hip_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        roll_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        roll_rot = quat_from_angle_axis(hip_roll, roll_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, roll_rot)
+        
+        # Hip yaw joint (到达hip_yaw_link)
+        offset = self.left_hip_yaw_offset.unsqueeze(0).expand(batch_size, -1)
+        hip_pos = current_pos + quat_rotate(current_rot, offset)
+        
+        return hip_pos
+    
+    def _compute_right_hip_yaw_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw):
+        """
+        计算右髋部(hip_yaw_link)位置（与左髋部对称）
+        """
+        batch_size = root_pos.shape[0]
+        current_pos = root_pos
+        current_rot = root_rot
+        
+        # Hip pitch
+        offset = self.right_hip_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        pitch_rot = quat_from_angle_axis(hip_pitch, pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, pitch_rot)
+        
+        # Hip roll (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.right_hip_roll_rpy[0].unsqueeze(0).expand(batch_size),
+            self.right_hip_roll_rpy[1].unsqueeze(0).expand(batch_size),
+            self.right_hip_roll_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.right_hip_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        roll_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        roll_rot = quat_from_angle_axis(hip_roll, roll_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, roll_rot)
+        
+        # Hip yaw (到达hip_yaw_link)
+        offset = self.right_hip_yaw_offset.unsqueeze(0).expand(batch_size, -1)
+        hip_pos = current_pos + quat_rotate(current_rot, offset)
+        
+        return hip_pos
+    
+    def _compute_left_knee_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw, knee):
+        """
+        计算左膝盖(knee_link)位置
+        运动学链: pelvis -> hip_pitch -> hip_roll -> hip_yaw -> knee_link
+        """
+        batch_size = root_pos.shape[0]
+        current_pos = root_pos
+        current_rot = root_rot
+        
+        # Hip pitch joint
+        offset = self.left_hip_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        pitch_rot = quat_from_angle_axis(hip_pitch, pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, pitch_rot)
+        
+        # Hip roll joint (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.left_hip_roll_rpy[0].unsqueeze(0).expand(batch_size),
+            self.left_hip_roll_rpy[1].unsqueeze(0).expand(batch_size),
+            self.left_hip_roll_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.left_hip_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        roll_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        roll_rot = quat_from_angle_axis(hip_roll, roll_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, roll_rot)
+        
+        # Hip yaw joint
+        offset = self.left_hip_yaw_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        yaw_rot = quat_from_angle_axis(hip_yaw, yaw_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, yaw_rot)
+        
+        # Knee joint (with pre-rotation, 到达knee_link)
+        pre_rot = quat_from_euler_xyz(
+            self.left_knee_rpy[0].unsqueeze(0).expand(batch_size),
+            self.left_knee_rpy[1].unsqueeze(0).expand(batch_size),
+            self.left_knee_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.left_knee_offset.unsqueeze(0).expand(batch_size, -1)
+        knee_pos = current_pos + quat_rotate(current_rot, offset)
+        
+        return knee_pos
+    
+    def _compute_right_knee_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw, knee):
+        """
+        计算右膝盖(knee_link)位置（与左膝盖对称）
+        """
+        batch_size = root_pos.shape[0]
+        current_pos = root_pos
+        current_rot = root_rot
+        
+        # Hip pitch
+        offset = self.right_hip_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        pitch_rot = quat_from_angle_axis(hip_pitch, pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, pitch_rot)
+        
+        # Hip roll (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.right_hip_roll_rpy[0].unsqueeze(0).expand(batch_size),
+            self.right_hip_roll_rpy[1].unsqueeze(0).expand(batch_size),
+            self.right_hip_roll_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.right_hip_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        roll_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        roll_rot = quat_from_angle_axis(hip_roll, roll_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, roll_rot)
+        
+        # Hip yaw
+        offset = self.right_hip_yaw_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        yaw_rot = quat_from_angle_axis(hip_yaw, yaw_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, yaw_rot)
+        
+        # Knee (with pre-rotation, 到达knee_link)
+        pre_rot = quat_from_euler_xyz(
+            self.right_knee_rpy[0].unsqueeze(0).expand(batch_size),
+            self.right_knee_rpy[1].unsqueeze(0).expand(batch_size),
+            self.right_knee_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.right_knee_offset.unsqueeze(0).expand(batch_size, -1)
+        knee_pos = current_pos + quat_rotate(current_rot, offset)
+        
+        return knee_pos
+    
+    def _compute_left_ankle_roll_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw, knee, ankle_pitch, ankle_roll):
+        """
+        计算左脚踝(ankle_roll_link)位置
+        运动学链: pelvis -> hip_pitch -> hip_roll -> hip_yaw -> knee -> ankle_pitch -> ankle_roll_link
+        """
+        batch_size = root_pos.shape[0]
+        current_pos = root_pos
+        current_rot = root_rot
+        
+        # Hip pitch joint
+        offset = self.left_hip_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        pitch_rot = quat_from_angle_axis(hip_pitch, pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, pitch_rot)
+        
+        # Hip roll joint (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.left_hip_roll_rpy[0].unsqueeze(0).expand(batch_size),
+            self.left_hip_roll_rpy[1].unsqueeze(0).expand(batch_size),
+            self.left_hip_roll_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.left_hip_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        roll_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        roll_rot = quat_from_angle_axis(hip_roll, roll_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, roll_rot)
+        
+        # Hip yaw joint
+        offset = self.left_hip_yaw_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        yaw_rot = quat_from_angle_axis(hip_yaw, yaw_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, yaw_rot)
+        
+        # Knee joint (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.left_knee_rpy[0].unsqueeze(0).expand(batch_size),
+            self.left_knee_rpy[1].unsqueeze(0).expand(batch_size),
+            self.left_knee_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.left_knee_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        knee_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        knee_rot = quat_from_angle_axis(knee, knee_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, knee_rot)
+        
+        # Ankle pitch joint
+        offset = self.left_ankle_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        ankle_pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        ankle_pitch_rot = quat_from_angle_axis(ankle_pitch, ankle_pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, ankle_pitch_rot)
+        
+        # Ankle roll joint (到达ankle_roll_link)
+        offset = self.left_ankle_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        ankle_pos = current_pos + quat_rotate(current_rot, offset)
+        
+        return ankle_pos
+    
+    def _compute_right_ankle_roll_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw, knee, ankle_pitch, ankle_roll):
+        """
+        计算右脚踝(ankle_roll_link)位置（与左脚踝对称）
+        """
+        batch_size = root_pos.shape[0]
+        current_pos = root_pos
+        current_rot = root_rot
+        
+        # Hip pitch
+        offset = self.right_hip_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        pitch_rot = quat_from_angle_axis(hip_pitch, pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, pitch_rot)
+        
+        # Hip roll (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.right_hip_roll_rpy[0].unsqueeze(0).expand(batch_size),
+            self.right_hip_roll_rpy[1].unsqueeze(0).expand(batch_size),
+            self.right_hip_roll_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.right_hip_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        roll_axis = torch.tensor([1.0, 0.0, 0.0], device=self.device)
+        roll_rot = quat_from_angle_axis(hip_roll, roll_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, roll_rot)
+        
+        # Hip yaw
+        offset = self.right_hip_yaw_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        yaw_axis = torch.tensor([0.0, 0.0, 1.0], device=self.device)
+        yaw_rot = quat_from_angle_axis(hip_yaw, yaw_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, yaw_rot)
+        
+        # Knee (with pre-rotation)
+        pre_rot = quat_from_euler_xyz(
+            self.right_knee_rpy[0].unsqueeze(0).expand(batch_size),
+            self.right_knee_rpy[1].unsqueeze(0).expand(batch_size),
+            self.right_knee_rpy[2].unsqueeze(0).expand(batch_size)
+        )
+        current_rot = quat_mul(current_rot, pre_rot)
+        offset = self.right_knee_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        knee_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        knee_rot = quat_from_angle_axis(knee, knee_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, knee_rot)
+        
+        # Ankle pitch
+        offset = self.right_ankle_pitch_offset.unsqueeze(0).expand(batch_size, -1)
+        current_pos = current_pos + quat_rotate(current_rot, offset)
+        ankle_pitch_axis = torch.tensor([0.0, 1.0, 0.0], device=self.device)
+        ankle_pitch_rot = quat_from_angle_axis(ankle_pitch, ankle_pitch_axis.unsqueeze(0).expand(batch_size, -1))
+        current_rot = quat_mul(current_rot, ankle_pitch_rot)
+        
+        # Ankle roll (到达ankle_roll_link)
+        offset = self.right_ankle_roll_offset.unsqueeze(0).expand(batch_size, -1)
+        ankle_pos = current_pos + quat_rotate(current_rot, offset)
+        
+        return ankle_pos
     
     def _compute_left_foot_position(self, root_pos, root_rot, hip_pitch, hip_roll, hip_yaw, knee, ankle_pitch, ankle_roll):
         """

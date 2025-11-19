@@ -71,7 +71,13 @@ class ActorCriticRMADoubleRewardAMP(ActorCriticRMADoubleReward):
             print("[AMP Model] Warning: disc_obs_size未设置，discriminator未构建")
     
     def _build_discriminator(self, input_size, hidden_dims, activation):
-        """构建discriminator网络"""
+        """
+        构建discriminator网络（参考MimicKit实现）
+        
+        关键差异：
+        1. 输出层使用uniform初始化（而非orthogonal）
+        2. 隐藏层可以使用orthogonal初始化
+        """
         activation_fn = self._get_activation_fn(activation)
         
         layers = []
@@ -84,14 +90,23 @@ class ActorCriticRMADoubleRewardAMP(ActorCriticRMADoubleReward):
             last_size = hidden_dim
         
         # 输出层 (logit，单个值)
-        layers.append(nn.Linear(last_size, 1))
+        output_layer = nn.Linear(last_size, 1)
+        layers.append(output_layer)
         
-        # 初始化权重
+        # 初始化权重（参考MimicKit）
         disc_net = nn.Sequential(*layers)
+        init_output_scale = 1.0  # 与MimicKit保持一致
+        
         for m in disc_net.modules():
             if isinstance(m, nn.Linear):
-                nn.init.orthogonal_(m.weight, gain=1.0)
-                nn.init.constant_(m.bias, 0.0)
+                # 隐藏层：使用orthogonal初始化
+                if m is not output_layer:
+                    nn.init.orthogonal_(m.weight, gain=1.0)
+                    nn.init.constant_(m.bias, 0.0)
+                else:
+                    # 输出层：使用uniform初始化（MimicKit标准）
+                    nn.init.uniform_(m.weight, -init_output_scale, init_output_scale)
+                    nn.init.zeros_(m.bias)
         
         return disc_net
     

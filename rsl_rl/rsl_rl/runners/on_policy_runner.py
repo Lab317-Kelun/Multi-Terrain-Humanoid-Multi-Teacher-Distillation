@@ -82,19 +82,8 @@ class OnPolicyRunner:
         else:
             actor_critic_class = ActorCriticRMA
             print(f"Using default {policy_class_name}")
-        
-        # 检查是否需要disc_obs_size（AMP模型需要）
-        disc_obs_size = None
+                    
         if policy_class_name == "ActorCriticRMADoubleRewardAMP":
-            if hasattr(self.env, 'disc_obs_size'):
-                disc_obs_size = self.env.disc_obs_size
-                print(f"[AMP] Discriminator观测维度: {disc_obs_size}")
-            else:
-                print("[AMP] Warning: 环境没有disc_obs_size属性，AMP将被禁用")
-            
-        # 创建actor-critic模型
-        # 对于RMA类模型（包括AMP），使用特殊的参数结构
-        if 'RMA' in policy_class_name or policy_class_name == "ActorCriticRMADoubleRewardAMP":
             actor_critic_kwargs = {
                 'num_prop': self.env.cfg.env.n_proprio,
                 'num_scan': self.env.cfg.env.n_scan,
@@ -103,11 +92,9 @@ class OnPolicyRunner:
                 'num_priv_explicit': self.env.cfg.env.n_priv,
                 'num_hist': self.env.cfg.env.history_len,
                 'num_actions': self.env.num_actions,
+                'disc_obs_size':self.env.disc_obs_size,
                 **self.policy_cfg
             }
-            # 如果是AMP模型，添加disc_obs_size
-            if policy_class_name == "ActorCriticRMADoubleRewardAMP" and disc_obs_size is not None:
-                actor_critic_kwargs['disc_obs_size'] = disc_obs_size
         else:
             actor_critic_kwargs = {
                 'num_actor_obs': self.env.cfg.env.n_proprio,
@@ -186,9 +173,9 @@ class OnPolicyRunner:
         }
         
         # 如果是AMP，添加disc_obs_shape
-        if policy_class_name == "ActorCriticRMADoubleRewardAMP" and disc_obs_size is not None:
-            storage_kwargs['disc_obs_shape'] = [disc_obs_size]
-            print(f"[AMP] Storage将包含disc_obs，形状: {[disc_obs_size]}")
+        if policy_class_name == "ActorCriticRMADoubleRewardAMP":
+            storage_kwargs['disc_obs_shape'] = [self.env.disc_obs_size]
+            print(f"[AMP] Storage将包含disc_obs，形状: {[self.env.disc_obs_size]}")
             
         self.alg.init_storage(**storage_kwargs)
 
@@ -248,7 +235,9 @@ class OnPolicyRunner:
                     actions = self.alg.act(obs, critic_obs, infos, hist_encoding)
                     obs, privileged_obs, rewards, dones, infos = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    infos = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in infos.items()}
+                    rewards = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in rewards.items()}
+                    obs, critic_obs, dones = obs.to(self.device), critic_obs.to(self.device), dones.to(self.device),
                     total_rew = self.alg.process_env_step(rewards, dones, infos)
                     
                     if self.log_dir is not None:
@@ -280,7 +269,7 @@ class OnPolicyRunner:
                 self.alg.compute_returns(critic_obs)
             
             # Learning step - 适配不同的算法返回值
-            if hasattr(self.alg, 'use_double_critic') and self.alg.use_double_critic:
+            if self.alg.use_double_critic:
                 mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse = self.alg.update()
             else:
                 mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_disc_loss, mean_disc_acc, mean_priv_reg_loss, priv_reg_coef = self.alg.update()
@@ -642,14 +631,43 @@ class OnPolicyRunner:
         if self.if_depth:
             state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
             state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
+        
+        # 如果算法有discriminator优化器，也保存它的状态
+        if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
+            state_dict['disc_optimizer_state_dict'] = self.alg.disc_optimizer.state_dict()
+        
         torch.save(state_dict, path)
 
     def load(self, path, load_optimizer=True):
         print("*" * 80)
         print("Loading model from {}...".format(path))
         loaded_dict = torch.load(path, map_location=self.device)
-        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        
+        # 加载actor_critic，允许缺少某些键（如discriminator）
+        model_state = loaded_dict['model_state_dict']
+        current_model_state = self.alg.actor_critic.state_dict()
+        
+        # 检查哪些键缺失
+        missing_keys = set(current_model_state.keys()) - set(model_state.keys())
+        unexpected_keys = set(model_state.keys()) - set(current_model_state.keys())
+        
+        if missing_keys:
+            print(f"[Load] 警告: 模型中有但checkpoint中缺失的键: {missing_keys}")
+            print(f"[Load] 这些键将保持初始化值（例如：discriminator将重新开始训练）")
+        
+        if unexpected_keys:
+            print(f"[Load] 警告: checkpoint中有但模型中不存在的键（将被忽略）: {unexpected_keys}")
+        
+        # 使用strict=False允许缺少某些键
+        load_result = self.alg.actor_critic.load_state_dict(model_state, strict=False)
+        
+        if load_result.missing_keys:
+            print(f"[Load] 实际缺失的键: {load_result.missing_keys}")
+        if load_result.unexpected_keys:
+            print(f"[Load] 实际多余的键: {load_result.unexpected_keys}")
+        
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
+        
         if self.if_depth:
             if 'depth_encoder_state_dict' not in loaded_dict:
                 warnings.warn("'depth_encoder_state_dict' key does not exist, not loading depth encoder...")
@@ -662,8 +680,31 @@ class OnPolicyRunner:
             else:
                 print("No saved depth actor, Copying actor critic actor to depth actor...")
                 self.alg.depth_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
+        
+        # 加载优化器（包括discriminator优化器）
         if load_optimizer:
-            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+            try:
+                # 尝试加载优化器状态
+                self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
+                print("[Load] 成功加载主优化器状态")
+            except (ValueError, KeyError) as e:
+                # 如果参数组不匹配（例如：旧模型没有discriminator参数），跳过优化器加载
+                print(f"[Load] 警告: 无法加载优化器状态: {e}")
+                print("[Load] 优化器将使用初始状态（这对于从非AMP模型恢复是正常的）")
+            
+            # 如果算法有discriminator优化器，尝试加载
+            if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
+                if 'disc_optimizer_state_dict' in loaded_dict:
+                    try:
+                        print("[Load] 加载discriminator优化器状态...")
+                        self.alg.disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
+                        print("[Load] 成功加载discriminator优化器状态")
+                    except (ValueError, KeyError) as e:
+                        print(f"[Load] 警告: 无法加载discriminator优化器状态: {e}")
+                        print("[Load] discriminator优化器将使用初始状态")
+                else:
+                    print("[Load] checkpoint中没有discriminator优化器状态，将使用初始状态")
+        
         # self.current_learning_iteration = loaded_dict['iter']
         print("*" * 80)
         return loaded_dict['infos']
