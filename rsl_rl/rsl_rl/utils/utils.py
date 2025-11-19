@@ -78,7 +78,7 @@ def unpad_trajectories(trajectories, masks):
 
 def resolve_obs_groups(obs: Union[torch.Tensor, TensorDict],
                        obs_groups_cfg: Dict,
-                       default_sets: Iterable[str] | None = None
+                       default_sets: Union[Iterable[str], None] = None
                        ) -> Tuple[TensorDict, Dict]:
     """Resolve observation groups into TensorDict slices and metadata."""
     if obs_groups_cfg is None:
@@ -123,7 +123,7 @@ def tensor_to_obs_groups(obs: Union[torch.Tensor, TensorDict], obs_groups_cfg: D
     return TensorDict(group_tensors, batch_size=[obs.shape[0]])
 
 
-def store_code_state(log_dir: str | None, repo_paths: Iterable[str]) -> list[str]:
+def store_code_state(log_dir: Union[str, None], repo_paths: Iterable[str]) -> list[str]:
     """Dump git diff files for the provided repositories into the log directory."""
     if not log_dir:
         return []
@@ -149,7 +149,7 @@ def store_code_state(log_dir: str | None, repo_paths: Iterable[str]) -> list[str
     return saved_files
 
 
-def _find_git_root(start_path: Path) -> Path | None:
+def _find_git_root(start_path: Path) -> Union[Path, None]:
     for path in [start_path, *start_path.parents]:
         if (path / ".git").exists():
             return path

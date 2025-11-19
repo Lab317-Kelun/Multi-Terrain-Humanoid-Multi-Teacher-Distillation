@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from tensordict import TensorDict
 from torch.distributions import Normal
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Union
 
 from rsl_rl.networks import EmpiricalNormalization, HiddenState
 from rsl_rl.modules.actor_critic import Actor, get_activation
@@ -28,26 +28,26 @@ class MultiStudentTeacher(nn.Module):
         teacher_obs_normalization: bool = False,
         # Actor architecture (defaults aligned with actor_critic.Actor)
         activation: str = "elu",
-        scan_encoder_dims: tuple[int] | list[int] = (256, 256, 256),
-        priv_encoder_dims: tuple[int] | list[int] = (),
+        scan_encoder_dims: Union[tuple[int], list[int]] = (256, 256, 256),
+        priv_encoder_dims: Union[tuple[int], list[int]] = (),
         tanh_encoder_output: bool = False,
         # Student observation layout
-        student_num_prop: int | None = None,
-        student_num_scan: int | None = None,
+        student_num_prop: Union[int, None] = None,
+        student_num_scan: Union[int, None] = None,
         student_num_priv_latent: int = 0,
         student_num_priv_explicit: int = 0,
         student_num_hist: int = 0,
-        student_actor_hidden_dims: tuple[int] | list[int] | None = None,
+        student_actor_hidden_dims: Union[tuple[int], list[int], None] = None,
         # Teacher observation layout
-        teacher_num_prop: int | None = None,
-        teacher_num_scan: int | None = None,
+        teacher_num_prop: Union[int, None] = None,
+        teacher_num_scan: Union[int, None] = None,
         teacher_num_priv_latent: int = 0,
         teacher_num_priv_explicit: int = 0,
         teacher_num_hist: int = 0,
-        teacher_actor_hidden_dims: tuple[int] | list[int] | None = None,
+        teacher_actor_hidden_dims: Union[tuple[int], list[int], None] = None,
         # Backward-compat shims (will be used only if the new args are not provided)
-        student_hidden_dims: tuple[int] | list[int] | None = None,
-        teacher_hidden_dims: tuple[int] | list[int] | None = None,
+        student_hidden_dims: Union[tuple[int], list[int], None] = None,
+        teacher_hidden_dims: Union[tuple[int], list[int], None] = None,
         # Action noise
         init_noise_std: float = 0.1,
         noise_std_type: str = "scalar",
@@ -165,7 +165,7 @@ class MultiStudentTeacher(nn.Module):
         Normal.set_default_validate_args(False)
 
     def reset(
-        self, dones: torch.Tensor | None = None, hidden_states: tuple[HiddenState, HiddenState] = (None, None)
+        self, dones: Union[torch.Tensor, None] = None, hidden_states: tuple[HiddenState, HiddenState] = (None, None)
     ) -> None:
         pass
 
@@ -225,7 +225,7 @@ class MultiStudentTeacher(nn.Module):
     def get_hidden_states(self) -> tuple[HiddenState, HiddenState]:
         return None, None
 
-    def detach_hidden_states(self, dones: torch.Tensor | None = None) -> None:
+    def detach_hidden_states(self, dones: Union[torch.Tensor, None] = None) -> None:
         pass
 
     def train(self, mode: bool = True) -> None:

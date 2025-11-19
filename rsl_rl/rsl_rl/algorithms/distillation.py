@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import dataclass
+from typing import Union
 
 import torch
 import torch.nn as nn
@@ -15,11 +16,11 @@ from rsl_rl.utils import resolve_optimizer
 
 @dataclass
 class DistillationTransition:
-    observations: TensorDict | None = None
-    privileged_actions: torch.Tensor | None = None
-    actions: torch.Tensor | None = None
-    rewards: torch.Tensor | None = None
-    dones: torch.Tensor | None = None
+    observations: Union[TensorDict, None] = None
+    privileged_actions: Union[torch.Tensor, None] = None
+    actions: Union[torch.Tensor, None] = None
+    rewards: Union[torch.Tensor, None] = None
+    dones: Union[torch.Tensor, None] = None
 
     def clear(self) -> None:
         self.observations = None
@@ -65,12 +66,12 @@ class Distillation:
         num_learning_epochs: int = 1,
         gradient_length: int = 15,
         learning_rate: float = 1e-3,
-        max_grad_norm: float | None = None,
+        max_grad_norm: Union[float, None] = None,
         loss_type: str = "mse",
         optimizer: str = "adam",
         device: str = "cpu",
         # Distributed training parameters
-        multi_gpu_cfg: dict | None = None,
+        multi_gpu_cfg: Union[dict, None] = None,
     ) -> None:
         # Device-related parameters
         self.device = device
@@ -87,7 +88,7 @@ class Distillation:
         # Distillation components
         self.policy = policy
         self.policy.to(self.device)
-        self.storage: DistillationStorage | None = None
+        self.storage: Union[DistillationStorage, None] = None
 
         # Initialize the optimizer
         self.optimizer = resolve_optimizer(optimizer)(self.policy.parameters(), lr=learning_rate)

@@ -10,6 +10,7 @@ import statistics
 import time
 from collections import deque
 from pathlib import Path
+from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -31,7 +32,7 @@ from rsl_rl.utils import resolve_obs_groups, store_code_state, tensor_to_obs_gro
 class DistillationRunner(OnPolicyRunner):
     """On-policy runner for training and evaluation of teacher-student training."""
 
-    def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device: str = "cpu") -> None:
+    def __init__(self, env: VecEnv, train_cfg: dict, log_dir: Union[str, None] = None, device: str = "cpu") -> None:
         self.cfg = train_cfg
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]

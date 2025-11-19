@@ -8,6 +8,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from functools import reduce
+from typing import Union
 
 from rsl_rl.utils import resolve_nn_activation
 
@@ -26,10 +27,10 @@ class MLP(nn.Sequential):
     def __init__(
         self,
         input_dim: int,
-        output_dim: int | tuple[int] | list[int],
-        hidden_dims: tuple[int] | list[int],
+        output_dim: Union[int, tuple[int], list[int]],
+        hidden_dims: Union[tuple[int], list[int]],
         activation: str = "elu",
-        last_activation: str | None = None,
+        last_activation: Union[str, None] = None,
     ) -> None:
         """Initialize the MLP.
 
@@ -76,7 +77,7 @@ class MLP(nn.Sequential):
         for idx, layer in enumerate(layers):
             self.add_module(f"{idx}", layer)
 
-    def init_weights(self, scales: float | tuple[float]) -> None:
+    def init_weights(self, scales: Union[float, tuple[float]]) -> None:
         """Initialize the weights of the MLP.
 
         Args:
