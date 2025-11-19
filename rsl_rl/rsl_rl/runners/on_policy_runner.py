@@ -95,6 +95,18 @@ class OnPolicyRunner:
                 'disc_obs_size':self.env.disc_obs_size,
                 **self.policy_cfg
             }
+        elif policy_class_name == "ActorCriticRMADoubleReward":
+            # ActorCriticRMADoubleReward需要与ActorCriticRMADoubleRewardAMP相同的参数（除了disc_obs_size）
+            actor_critic_kwargs = {
+                'num_prop': self.env.cfg.env.n_proprio,
+                'num_scan': self.env.cfg.env.n_scan,
+                'num_critic_obs': self.env.num_obs,
+                'num_priv_latent': self.env.cfg.env.n_priv_latent,
+                'num_priv_explicit': self.env.cfg.env.n_priv,
+                'num_hist': self.env.cfg.env.history_len,
+                'num_actions': self.env.num_actions,
+                **self.policy_cfg
+            }
         else:
             actor_critic_kwargs = {
                 'num_actor_obs': self.env.cfg.env.n_proprio,

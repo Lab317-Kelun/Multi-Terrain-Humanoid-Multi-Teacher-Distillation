@@ -70,6 +70,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         # 启用接触信息
         include_foot_contacts = True
+        use_double_critic = True
         
     # 课程学习配置
     class curriculum_config:
