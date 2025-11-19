@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from torch.utils.tensorboard import SummaryWriter
 
 try:
@@ -49,10 +49,9 @@ class WandbSummaryWriter(SummaryWriter):
         wandb.config.update({"runner_cfg": runner_cfg})
         wandb.config.update({"policy_cfg": policy_cfg})
         wandb.config.update({"alg_cfg": alg_cfg})
-        try:
-            wandb.config.update({"env_cfg": env_cfg.to_dict()})
-        except Exception:
-            wandb.config.update({"env_cfg": asdict(env_cfg)})
+
+        env_payload = self._normalize_config_payload(env_cfg)
+        wandb.config.update({"env_cfg": env_payload})
 
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None, new_style=False):
         super().add_scalar(
@@ -85,3 +84,20 @@ class WandbSummaryWriter(SummaryWriter):
             return self.name_map[path]
         else:
             return path
+
+    def _normalize_config_payload(self, cfg):
+        if cfg is None:
+            return {}
+        if hasattr(cfg, "to_dict"):
+            try:
+                return cfg.to_dict()
+            except Exception:  # pragma: no cover - best effort conversion
+                pass
+        if is_dataclass(cfg):
+            try:
+                return asdict(cfg)
+            except TypeError:
+                pass
+        if isinstance(cfg, dict):
+            return cfg
+        return str(cfg)
