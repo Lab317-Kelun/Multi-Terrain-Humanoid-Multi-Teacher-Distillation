@@ -558,7 +558,13 @@ class OnPolicyRunner:
         print("*" * 80)
         print("Loading model from {}...".format(path))
         loaded_dict = torch.load(path, map_location=self.device)
-        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
+        # 过滤掉 discriminator 相关的键
+        model_state_dict = loaded_dict['model_state_dict']
+        filtered_state_dict = {k: v for k, v in model_state_dict.items() if not k.startswith('discriminator.')}
+        removed_keys = [k for k in model_state_dict.keys() if k.startswith('discriminator.')]
+        if removed_keys:
+            print(f"Removed discriminator keys from state_dict: {removed_keys}")
+        self.alg.actor_critic.load_state_dict(filtered_state_dict)
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
         if self.if_depth:
             if 'depth_encoder_state_dict' not in loaded_dict:

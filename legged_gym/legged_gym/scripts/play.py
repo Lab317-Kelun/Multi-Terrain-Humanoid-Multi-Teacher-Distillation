@@ -67,6 +67,15 @@ def play(args):
 
     env_cfg.terrain.height = [0.00, 0.02]
     
+    env_cfg.commands.success_mode = 'survival_time'
+    env_cfg.commands.survival_time_threshold = 6.0  # 存活时间阈值（秒）
+    env_cfg.commands.survival_success_threshold = 1  # 连续存活成功次数阈值
+    env_cfg.commands.survival_failure_threshold = 2   # 连续存活失败次数阈值
+    env_cfg.commands.ranges.lin_vel_x = [0.2, 1.0] # min max [m/s]
+    env_cfg.commands.ranges.lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+    env_cfg.commands.ranges.ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
+    env_cfg.commands.ranges.heading = [-0.0, 0.0]
+    
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
     env_cfg.domain_rand.randomize_friction = True
