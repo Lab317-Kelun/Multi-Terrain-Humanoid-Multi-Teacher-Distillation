@@ -307,10 +307,6 @@ class HumanoidBEAMDOJOAMPCfg(LeggedRobotCfg):
             
             foothold = 0.05
             
-            # ====== AMP风格奖励 (通过discriminator) ======
-            # AMP奖励会在训练循环中由discriminator自动计算
-            # 这里不需要手动定义scale
-            
         only_positive_rewards = False
         tracking_sigma = 0.25
         soft_dof_pos_limit = 0.975

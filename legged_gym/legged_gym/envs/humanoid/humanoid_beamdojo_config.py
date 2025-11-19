@@ -274,12 +274,12 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             deviation_knee_joint = -0.75
             dof_acc = -2.5e-7
             dof_pos_limits = -2.
-            feet_air_time = 1.0  #0.05
-            feet_clearance = -3.0 #-0.25
+            feet_air_time = 0.05
+            feet_clearance = -0.25
             feet_distance_lateral = 0.5  
             knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
-            feet_parallel = -0.0  #-3.0
+            feet_parallel = -3.0
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
@@ -305,13 +305,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         soft_torque_limit = 0.95
         base_height_target = 0.74
         max_contact_force = 400.
-        least_feet_distance = 0.18
-        least_feet_distance_lateral = 0.18
-        most_feet_distance_lateral = 0.25
-        most_knee_distance_lateral = 0.25
-        least_knee_distance_lateral = 0.18
-        clearance_height_target = 0.18 #0.18
-        is_play = False                   # 是否为播放模式
+        least_feet_distance = 0.2
+        least_feet_distance_lateral = 0.2
+        most_feet_distance_lateral = 0.35
+        most_knee_distance_lateral = 0.35
+        least_knee_distance_lateral = 0.2
+        clearance_height_target = 0.14
+        is_play = False
         
         foothold_foot_length = 0.12         # 脚长度 [m] 
         foothold_foot_width = 0.06          # 脚宽度 [m]
