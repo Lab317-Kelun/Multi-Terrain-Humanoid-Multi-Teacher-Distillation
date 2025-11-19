@@ -6,13 +6,11 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-import torch
-
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.envs.humanoid.humanoid_beamdojo_config import HumanoidBEAMDOJOCfgPPO
 from legged_gym.utils import get_args, task_registry
 from rsl_rl.runners.distillation_runner import DistillationRunner
-
+import torch
 
 def build_distillation_cfg(env_cfg) -> dict:
     """Assemble the runner/algorithm configuration for distillation."""
@@ -87,7 +85,7 @@ def build_distillation_cfg(env_cfg) -> dict:
         "num_steps_per_env": getattr(runner_defaults, "num_steps_per_env", 24),
         "save_interval": getattr(runner_defaults, "save_interval", 200),
         "max_iterations": getattr(runner_defaults, "max_iterations", 10000),
-        "logger_type": "tensorboard",
+        "logger_type": "wandb",
         "obs_groups": obs_groups,
         "policy": policy_cfg,
         "algorithm": algorithm_cfg,

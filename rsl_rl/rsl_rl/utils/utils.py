@@ -30,7 +30,7 @@
 
 import subprocess
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Tuple, Union
 
 import torch
 from tensordict import TensorDict
@@ -76,7 +76,7 @@ def unpad_trajectories(trajectories, masks):
     return trajectories.transpose(1, 0)[masks.transpose(1, 0)].view(-1, trajectories.shape[0], trajectories.shape[-1]).transpose(1, 0)
 
 
-def resolve_obs_groups(obs: torch.Tensor | TensorDict,
+def resolve_obs_groups(obs: Union[torch.Tensor, TensorDict],
                        obs_groups_cfg: Dict,
                        default_sets: Iterable[str] | None = None
                        ) -> Tuple[TensorDict, Dict]:
@@ -110,7 +110,7 @@ def resolve_obs_groups(obs: torch.Tensor | TensorDict,
     return obs_td, resolved_cfg
 
 
-def tensor_to_obs_groups(obs: torch.Tensor | TensorDict, obs_groups_cfg: Dict) -> TensorDict:
+def tensor_to_obs_groups(obs: Union[torch.Tensor, TensorDict], obs_groups_cfg: Dict) -> TensorDict:
     """Convert a flat observation tensor to a TensorDict according to group slices."""
     if isinstance(obs, TensorDict):
         return obs
