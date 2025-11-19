@@ -10,12 +10,11 @@ import statistics
 import time
 from collections import deque
 from pathlib import Path
-from typing import Union, Dict, List
+from typing import Dict, Union
 
 import torch
 import torch.distributed as dist
 from tensordict import TensorDict
-import wandb
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -71,7 +70,7 @@ class DistillationRunner(OnPolicyRunner):
 
     def _configure_multi_gpu(self) -> None:
         if dist.is_available() and dist.is_initialized():
-            self.is_distributed = False
+            self.is_distributed = True
             self.gpu_global_rank = dist.get_rank()
             self.gpu_world_size = dist.get_world_size()
             self.multi_gpu_cfg = {"global_rank": self.gpu_global_rank, "world_size": self.gpu_world_size}
@@ -84,23 +83,58 @@ class DistillationRunner(OnPolicyRunner):
     def _prepare_logging_writer(self) -> None:
         if self.disable_logs or self.writer is not None:
             return
-        if self.logger_type == "tensorboard" and self.log_dir and SummaryWriter is not None:
-            self.writer = SummaryWriter(self.log_dir, flush_secs=10)
+        if self.logger_type == "tensorboard":
+            if self.log_dir and SummaryWriter is not None:
+                self.writer = SummaryWriter(self.log_dir, flush_secs=10)
+            else:
+                print("TensorBoard logging requested, but SummaryWriter is unavailable or log_dir is missing. Disabling logging.")
+                self.logger_type = "none"
         elif self.logger_type == "wandb":
-            # 初始化 WandB
-            print(f"Initializing WandB logging to project: {self.cfg.get('wandb_project', 'rsl_rl')}")
-            wandb.init(
-                project=self.cfg.get("wandb_project", "rsl_rl"),
-                entity=self.cfg.get("wandb_entity", None),
-                group=self.cfg.get("wandb_group", None),
-                name=self.cfg.get("wandb_name", None),
-                dir=self.log_dir,
-                config=self.cfg,
-            )
-            self.writer = wandb
-        elif self.logger_type in {"neptune"}:
-            print("⚠️  Neptune logging is not implemented for DistillationRunner; disabling remote logger.")
-            self.logger_type = "none"
+            if not self.log_dir:
+                print("WandB logging requested, but no log_dir provided. Disabling logging.")
+                self.logger_type = "none"
+                return
+            try:
+                from rsl_rl.utils.wandb_utils import WandbSummaryWriter
+            except ModuleNotFoundError:
+                print("WandB logging requested, but wandb is not installed. Disabling logging.")
+                self.logger_type = "none"
+                return
+            entity_override = self.cfg.get("wandb_entity")
+            if entity_override:
+                os.environ["WANDB_USERNAME"] = str(entity_override)
+            name_override = self.cfg.get("wandb_name")
+            if name_override:
+                os.environ["WANDB_NAME"] = str(name_override)
+            group_override = self.cfg.get("wandb_group")
+            if group_override:
+                os.environ["WANDB_RUN_GROUP"] = str(group_override)
+            wandb_cfg = dict(self.cfg)
+            wandb_cfg.setdefault("wandb_project", self.cfg.get("wandb_project", "rsl_rl"))
+            print(f"Initializing WandB logging to project: {wandb_cfg['wandb_project']}")
+            self.writer = WandbSummaryWriter(self.log_dir, flush_secs=10, cfg=wandb_cfg)
+            if hasattr(self.writer, "log_config"):
+                try:
+                    self.writer.log_config(
+                        env_cfg=self.cfg.get("env_cfg", {}),
+                        runner_cfg=self.cfg.get("runner", {}),
+                        alg_cfg=self.cfg.get("algorithm", {}),
+                        policy_cfg=self.cfg.get("policy", {}),
+                    )
+                except Exception as exc:  # pragma: no cover - logging should not block training
+                    print(f"Unable to push configuration to WandB: {exc}")
+        elif self.logger_type == "neptune":
+            if not self.log_dir:
+                print("Neptune logging requested, but no log_dir provided. Disabling logging.")
+                self.logger_type = "none"
+                return
+            try:
+                from rsl_rl.utils.neptune_utils import NeptuneSummaryWriter
+            except ModuleNotFoundError:
+                print("Neptune logging requested, but neptune-client is not installed. Disabling logging.")
+                self.logger_type = "none"
+                return
+            self.writer = NeptuneSummaryWriter(self.log_dir, flush_secs=10, cfg=self.cfg)
 
     def train_mode(self) -> None:
         self.alg.policy.train()
@@ -150,12 +184,9 @@ class DistillationRunner(OnPolicyRunner):
         log_dict.update({f"Loss/{k}": v for k, v in locs["loss_dict"].items()})
 
         # 写入日志
-        if self.writer is not None:
-            if self.logger_type == "wandb":
-                self.writer.log(log_dict, step=self.tot_timesteps)
-            elif self.logger_type == "tensorboard":
-                for k, v in log_dict.items():
-                    self.writer.add_scalar(k, v, self.tot_timesteps)
+        if self.writer is not None and self.logger_type in {"wandb", "tensorboard", "neptune"}:
+            for k, v in log_dict.items():
+                self.writer.add_scalar(k, v, self.tot_timesteps)
 
         print(f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m ")
 
@@ -255,6 +286,13 @@ class DistillationRunner(OnPolicyRunner):
         # Save the final model after training
         if self.log_dir is not None and not self.disable_logs:
             self.save(os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"))
+
+        if self.writer is not None:
+            if hasattr(self.writer, "stop"):
+                self.writer.stop()
+            if hasattr(self.writer, "close"):
+                self.writer.close()
+            self.writer = None
 
     def _construct_algorithm(self, obs: TensorDict) -> Distillation:
         """Construct the distillation algorithm."""
