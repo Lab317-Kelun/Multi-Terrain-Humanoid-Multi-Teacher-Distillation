@@ -32,7 +32,7 @@ import torch
 from torch import Tensor
 import numpy as np
 from isaacgym.torch_utils import quat_apply, normalize
-from typing import Tuple
+from typing import Tuple, Dict
 
 # @ torch.jit.script
 def quat_apply_yaw(quat, vec):

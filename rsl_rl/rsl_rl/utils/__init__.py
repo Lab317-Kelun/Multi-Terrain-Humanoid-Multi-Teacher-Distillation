@@ -34,4 +34,6 @@ from .utils import (
 	resolve_obs_groups,
 	tensor_to_obs_groups,
 	store_code_state,
+    resolve_nn_activation,
+    resolve_optimizer
 )

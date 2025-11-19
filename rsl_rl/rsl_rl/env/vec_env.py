@@ -30,7 +30,7 @@
 
 from abc import ABC, abstractmethod
 import torch
-from typing import Tuple, Union
+from typing import Tuple, Union, Dict, List
 
 # minimal interface of the environment
 class VecEnv(ABC):
@@ -44,10 +44,10 @@ class VecEnv(ABC):
     rew_buf: torch.Tensor
     reset_buf: torch.Tensor
     episode_length_buf: torch.Tensor # current episode duration
-    extras: dict
+    extras: Dict
     device: torch.device
     @abstractmethod
-    def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, Union[torch.Tensor, None], torch.Tensor, torch.Tensor, dict]:
+    def step(self, actions: torch.Tensor) -> Tuple[torch.Tensor, Union[torch.Tensor, None], torch.Tensor, torch.Tensor, Dict]:
         pass
     @abstractmethod
     def reset(self, env_ids: Union[list, torch.Tensor]):

@@ -36,9 +36,10 @@ import random
 from isaacgym import gymapi
 from isaacgym import gymutil
 import argparse
+from typing import Dict, Union, Tuple
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 
-def class_to_dict(obj) -> dict:
+def class_to_dict(obj) -> Dict:
     if not  hasattr(obj,"__dict__"):
         return obj
     result = {}
@@ -55,8 +56,8 @@ def class_to_dict(obj) -> dict:
         result[key] = element
     return result
 
-def update_class_from_dict(obj, dict):
-    for key, val in dict.items():
+def update_class_from_dict(obj, Dict):
+    for key, val in Dict.items():
         attr = getattr(obj, key, None)
         if isinstance(attr, type):
             update_class_from_dict(attr, val)

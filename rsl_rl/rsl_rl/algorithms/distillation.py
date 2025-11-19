@@ -4,13 +4,14 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import dataclass
-from typing import Union
+from typing import Union,  Dict, List
 
 import torch
 import torch.nn as nn
 from tensordict import TensorDict
 
-from rsl_rl.modules import MultiStudentTeacher
+
+from rsl_rl.modules.teacher_student import MultiStudentTeacher
 from rsl_rl.utils import resolve_optimizer
 
 
@@ -71,7 +72,7 @@ class Distillation:
         optimizer: str = "adam",
         device: str = "cpu",
         # Distributed training parameters
-        multi_gpu_cfg: Union[dict, None] = None,
+        multi_gpu_cfg: Union[Dict, None] = None,
     ) -> None:
         # Device-related parameters
         self.device = device
@@ -121,7 +122,7 @@ class Distillation:
         num_envs: int,
         num_transitions_per_env: int,
         obs: TensorDict,
-        actions_shape: tuple[int],
+        actions_shape,
     ) -> None:
         # Create rollout storage
         self.storage = DistillationStorage(num_envs, num_transitions_per_env, self.device)
@@ -135,7 +136,7 @@ class Distillation:
         return self.transition.actions
 
     def process_env_step(
-        self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict[str, torch.Tensor]
+        self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: Dict[str, torch.Tensor]
     ) -> None:
         # Update the normalizers
         self.policy.update_normalization(obs)
@@ -150,7 +151,7 @@ class Distillation:
         self.transition.clear()
         self.policy.reset(dones)
 
-    def update(self) -> dict[str, float]:
+    def update(self) -> Dict[str, float]:
         self.num_updates += 1
         mean_behavior_loss = 0
         loss = 0
@@ -162,10 +163,13 @@ class Distillation:
             if self.storage is None:
                 raise RuntimeError("Storage not initialized. Call init_storage before calling update().")
             for obs, _, privileged_actions, dones in self.storage.generator():
+                obs = obs.clone()
+                privileged_actions = privileged_actions.clone()
                 # Inference of the student for gradient computation
                 actions = self.policy.act_inference(obs)
 
                 # Behavior cloning loss
+                
                 behavior_loss = self.loss_fn(actions, privileged_actions)
 
                 # Total loss

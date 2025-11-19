@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from tensordict import TensorDict
 from torch.distributions import Normal
-from typing import Any, NoReturn, Union
+from typing import Any, NoReturn, Union , Dict, List
 
 from rsl_rl.networks import EmpiricalNormalization, HiddenState
 from rsl_rl.modules.actor_critic import Actor, get_activation
@@ -21,7 +21,7 @@ class MultiStudentTeacher(nn.Module):
     def __init__(
         self,
         obs: TensorDict,
-        obs_groups: dict[str, list[str]],
+        obs_groups: Dict[str, list[str]],
         num_actions: int,
         # Normalization
         student_obs_normalization: bool = False,
@@ -54,7 +54,7 @@ class MultiStudentTeacher(nn.Module):
         # Encoding behavior
         student_hist_encoding: bool = False,
         teacher_hist_encoding: bool = False,
-        **kwargs: dict[str, Any],
+        **kwargs: Dict[str, Any],
     ) -> None:
         if kwargs:
             print(
@@ -239,7 +239,7 @@ class MultiStudentTeacher(nn.Module):
             student_obs = self.get_student_obs(obs)
             self.student_obs_normalizer.update(student_obs)
 
-    def load_state_dict(self, state_dict: dict, strict: bool = True) -> bool:
+    def load_state_dict(self, state_dict: Dict, strict: bool = True) -> bool:
         """Load the parameters of the student and teacher networks.
 
         Args:

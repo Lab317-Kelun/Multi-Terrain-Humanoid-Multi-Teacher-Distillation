@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
-from typing import Union
+from typing import Union, Dict, List
 
 
 class EmpiricalNormalization(nn.Module):

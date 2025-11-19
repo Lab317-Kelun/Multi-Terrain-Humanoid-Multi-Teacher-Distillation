@@ -30,10 +30,56 @@
 
 import subprocess
 from pathlib import Path
-from typing import Dict, Iterable, Tuple, Union
+from typing import Dict, Iterable, Tuple, Union, List
 
 import torch
 from tensordict import TensorDict
+
+def resolve_nn_activation(act_name: str) -> torch.nn.Module:
+    if act_name == "elu":
+        return torch.nn.ELU()
+    elif act_name == "selu":
+        return torch.nn.SELU()
+    elif act_name == "relu":
+        return torch.nn.ReLU()
+    elif act_name == "crelu":
+        return torch.nn.CELU()
+    elif act_name == "lrelu":
+        return torch.nn.LeakyReLU()
+    elif act_name == "tanh":
+        return torch.nn.Tanh()
+    elif act_name == "sigmoid":
+        return torch.nn.Sigmoid()
+    elif act_name == "identity":
+        return torch.nn.Identity()
+    else:
+        raise ValueError(f"Invalid activation function '{act_name}'.")
+
+def resolve_optimizer(optimizer_name: str) -> torch.optim.Optimizer:
+    """Resolve the optimizer from the name.
+
+    Args:
+        optimizer_name: Name of the optimizer.
+
+    Returns:
+        The optimizer.
+
+    Raises:
+        ValueError: If the optimizer is not found.
+    """
+    optimizer_dict = {
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW,
+        "sgd": torch.optim.SGD,
+        "rmsprop": torch.optim.RMSprop,
+    }
+
+    optimizer_name = optimizer_name.lower()
+    if optimizer_name in optimizer_dict:
+        return optimizer_dict[optimizer_name]
+    else:
+        raise ValueError(f"Invalid optimizer '{optimizer_name}'. Valid optimizers are: {list(optimizer_dict.keys())}")
+
 
 def split_and_pad_trajectories(tensor, dones):
     """ Splits trajectories at done indices. Then concatenates them and padds with zeros up to the length og the longest trajectory.
@@ -123,7 +169,7 @@ def tensor_to_obs_groups(obs: Union[torch.Tensor, TensorDict], obs_groups_cfg: D
     return TensorDict(group_tensors, batch_size=[obs.shape[0]])
 
 
-def store_code_state(log_dir: Union[str, None], repo_paths: Iterable[str]) -> list[str]:
+def store_code_state(log_dir: Union[str, None], repo_paths: Iterable[str]) -> List[str]:
     """Dump git diff files for the provided repositories into the log directory."""
     if not log_dir:
         return []

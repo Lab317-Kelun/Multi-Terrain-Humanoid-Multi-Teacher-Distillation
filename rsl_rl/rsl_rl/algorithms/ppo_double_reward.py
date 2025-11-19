@@ -168,7 +168,7 @@ class PPODoubleReward:
 
     def process_env_step(self, rewards, dones, infos):
         """处理环境步骤，支持密集和稀疏奖励分离"""
-        if isinstance(rewards, dict) and self.use_double_critic:
+        if isinstance(rewards, Dict) and self.use_double_critic:
             # 如果奖励是字典格式，分离密集和稀疏奖励
             rewards_dense = rewards.get('dense', torch.zeros_like(rewards.get('total', rewards.get('sparse', torch.zeros(1)))))
             rewards_sparse = rewards.get('sparse', torch.zeros_like(rewards_dense))

@@ -8,9 +8,9 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from functools import reduce
-from typing import Union
+from typing import Union, Dict, List
 
-from rsl_rl.utils import resolve_nn_activation
+from rsl_rl.utils.utils import resolve_nn_activation
 
 
 class MLP(nn.Sequential):

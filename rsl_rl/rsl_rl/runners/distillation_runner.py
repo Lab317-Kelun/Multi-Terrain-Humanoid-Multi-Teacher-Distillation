@@ -10,11 +10,12 @@ import statistics
 import time
 from collections import deque
 from pathlib import Path
-from typing import Union
+from typing import Union, Dict, List
 
 import torch
 import torch.distributed as dist
 from tensordict import TensorDict
+import wandb
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -22,9 +23,9 @@ except ImportError:  # pragma: no cover - tensorboard is optional
     SummaryWriter = None
 
 import rsl_rl
-from rsl_rl.algorithms import Distillation
+from rsl_rl.algorithms.distillation import Distillation
 from rsl_rl.env import VecEnv
-from rsl_rl.modules import MultiStudentTeacher
+from rsl_rl.modules.teacher_student import MultiStudentTeacher
 from rsl_rl.runners import OnPolicyRunner
 from rsl_rl.utils import resolve_obs_groups, store_code_state, tensor_to_obs_groups
 
@@ -32,7 +33,7 @@ from rsl_rl.utils import resolve_obs_groups, store_code_state, tensor_to_obs_gro
 class DistillationRunner(OnPolicyRunner):
     """On-policy runner for training and evaluation of teacher-student training."""
 
-    def __init__(self, env: VecEnv, train_cfg: dict, log_dir: Union[str, None] = None, device: str = "cpu") -> None:
+    def __init__(self, env: VecEnv, train_cfg: Dict, log_dir: Union[str, None] = None, device: str = "cpu") -> None:
         self.cfg = train_cfg
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
@@ -85,8 +86,20 @@ class DistillationRunner(OnPolicyRunner):
             return
         if self.logger_type == "tensorboard" and self.log_dir and SummaryWriter is not None:
             self.writer = SummaryWriter(self.log_dir, flush_secs=10)
-        elif self.logger_type in {"wandb", "neptune"}:
-            print("⚠️  Wandb/Neptune logging is not implemented for DistillationRunner; disabling remote logger.")
+        elif self.logger_type == "wandb":
+            # 初始化 WandB
+            print(f"Initializing WandB logging to project: {self.cfg.get('wandb_project', 'rsl_rl')}")
+            wandb.init(
+                project=self.cfg.get("wandb_project", "rsl_rl"),
+                entity=self.cfg.get("wandb_entity", None),
+                group=self.cfg.get("wandb_group", None),
+                name=self.cfg.get("wandb_name", None),
+                dir=self.log_dir,
+                config=self.cfg,
+            )
+            self.writer = wandb
+        elif self.logger_type in {"neptune"}:
+            print("⚠️  Neptune logging is not implemented for DistillationRunner; disabling remote logger.")
             self.logger_type = "none"
 
     def train_mode(self) -> None:
@@ -105,34 +118,46 @@ class DistillationRunner(OnPolicyRunner):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         torch.save(state, path)
 
-    def log(self, locs, width: int = 80, pad: int = 35) -> None:  # noqa: D401 (compat signature)
-        behavior_loss = locs["loss_dict"].get("behavior", 0.0)
+    def log(self, locs, width: int = 80, pad: int = 35) -> None:
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+        self.tot_time += locs["collection_time"] + locs["learn_time"]
         iteration_time = locs["collection_time"] + locs["learn_time"]
-        self.tot_time += iteration_time
-        fps = int(self.num_steps_per_env * self.env.num_envs / max(iteration_time, 1e-6))
-
-        mean_reward = statistics.mean(locs["rewbuffer"]) if locs["rewbuffer"] else 0.0
-        mean_ep_len = statistics.mean(locs["lenbuffer"]) if locs["lenbuffer"] else 0.0
-
-        if self.writer and self.logger_type == "tensorboard":
-            step = locs["it"]
-            self.writer.add_scalar("loss/behavior", behavior_loss, step)
-            self.writer.add_scalar("reward/mean", mean_reward, step)
-            self.writer.add_scalar("episode/length", mean_ep_len, step)
-            self.writer.add_scalar("perf/fps", fps, step)
 
         ep_string = ""
-        if locs["ep_infos"]:
-            sample = locs["ep_infos"][0]
-            for key in sample:
-                values = torch.tensor([info[key] for info in locs["ep_infos"]], dtype=torch.float32)
-                value = float(values.mean())
-                ep_string += f"{('Mean episode ' + key + ':'):>{pad}} {value:.4f}\n"
+        if locs["rewbuffer"]:
+            mean_reward = statistics.mean(locs["rewbuffer"])
+            mean_trajectory_length = statistics.mean(locs["lenbuffer"])
+            ep_string = f"{'Mean reward':>{pad}} {mean_reward:.2f}\n"
+            ep_string += f"{'Mean episode length':>{pad}} {mean_trajectory_length:.2f}\n"
+        else:
+            mean_reward = 0.0
+            mean_trajectory_length = 0.0
 
-        header = f" \033[1m Learning iteration {locs['it']} / {locs['num_learning_iterations']} \033[0m "
-        log_lines = ["#" * width, header.center(width), "", f"{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)", f"{'Behavior loss:':>{pad}} {behavior_loss:.4f}", f"{'Mean reward:':>{pad}} {mean_reward:.2f}", f"{'Mean episode length:':>{pad}} {mean_ep_len:.2f}", "-" * width, ep_string, f"{'Total timesteps:':>{pad}} {self.tot_timesteps}", f"{'Iteration time:':>{pad}} {iteration_time:.2f}s", f"{'Total time:':>{pad}} {self.tot_time:.2f}s"]
-        print("\n".join([line for line in log_lines if line]))
+        mean_std = self.alg.policy.action_std.mean()
+        fps = int(self.num_steps_per_env * self.env.num_envs / (locs["collection_time"] + locs["learn_time"]))
+
+        # 构建日志字典
+        log_dict = {
+            "Loss/learning_rate": self.alg.learning_rate,
+            "Policy/mean_noise_std": mean_std.item(),
+            "Perf/total_fps": fps,
+            "Perf/collection time": locs["collection_time"],
+            "Perf/learning_time": locs["learn_time"],
+            "Train/mean_reward": mean_reward,
+            "Train/mean_episode_length": mean_trajectory_length,
+        }
+        # 添加算法返回的 loss
+        log_dict.update({f"Loss/{k}": v for k, v in locs["loss_dict"].items()})
+
+        # 写入日志
+        if self.writer is not None:
+            if self.logger_type == "wandb":
+                self.writer.log(log_dict, step=self.tot_timesteps)
+            elif self.logger_type == "tensorboard":
+                for k, v in log_dict.items():
+                    self.writer.add_scalar(k, v, self.tot_timesteps)
+
+        print(f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m ")
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
         # Initialize writer
@@ -193,8 +218,8 @@ class DistillationRunner(OnPolicyRunner):
                         cur_episode_length += 1
                         # Clear data for completed episodes
                         done_envs = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[done_envs][:, 0].cpu().numpy().tolist())
-                        lenbuffer.extend(cur_episode_length[done_envs][:, 0].cpu().numpy().tolist())
+                        rewbuffer.extend(cur_reward_sum[done_envs][:, 0].flatten().cpu().numpy().tolist())
+                        lenbuffer.extend(cur_episode_length[done_envs][:, 0].flatten().cpu().numpy().tolist())
                         cur_reward_sum[done_envs] = 0
                         cur_episode_length[done_envs] = 0
 
