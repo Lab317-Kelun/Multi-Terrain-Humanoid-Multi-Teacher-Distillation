@@ -70,6 +70,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         # 启用接触信息
         include_foot_contacts = True
+        use_double_critic = True
         
         next_goal_threshold = 0.4
         reach_goal_delay = 0.05
@@ -247,7 +248,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.1, 1.0] # min max [m/s]
+            lin_vel_x = [0.1, 1.5] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
             heading = [-0.0, 0.0] # base goal heading
@@ -270,7 +271,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             action_rate = -0.01
             
             # base_height = -10.0
-            tracking_base_height = 2.
+            # tracking_base_height = 0.0 #2.0
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -300,7 +301,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             
             foothold = 0.05 #0.05 0.1 0.025
             
-        only_positive_rewards = False
+        only_positive_rewards = False #True
         tracking_sigma = 0.25
         soft_dof_pos_limit = 0.975
         soft_dof_vel_limit = 0.80
@@ -326,7 +327,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            "tracking_base_height", "deviation_hip_joint", "deviation_ankle_joint", 
+            # "tracking_base_height", 
+            "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",

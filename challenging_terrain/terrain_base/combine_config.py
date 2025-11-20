@@ -40,7 +40,7 @@ class combine_config:
         ]
 
         proportions = [
-                ("single", 5, 1)
+                ("single", 8, 1)
         ]
 
 class generator:

@@ -214,8 +214,8 @@ class HumanoidRobot(BaseTask):
                     print("complete_rate=",(self.complete_times / self.total_times).cpu().numpy().copy())
                     self.last_times = self.total_times
                     
-        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
-        if use_double_critic and hasattr(self, 'dense_rew_buf') and hasattr(self, 'sparse_rew_buf'):
+
+        if self.cfg.env.use_double_critic:
             rewards = {
                 'dense': self.dense_rew_buf,
                 'sparse': self.sparse_rew_buf
@@ -512,10 +512,7 @@ class HumanoidRobot(BaseTask):
         """
         self.rew_buf[:] = 0.
         
-        # 检查是否使用双critic
-        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
-        
-        if use_double_critic:
+        if self.cfg.env.use_double_critic:
             # 初始化密集和稀疏奖励缓冲区
             if not hasattr(self, 'dense_rew_buf'):
                 self.dense_rew_buf = torch.zeros_like(self.rew_buf)
@@ -628,7 +625,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         
         obs_buf = torch.cat((
