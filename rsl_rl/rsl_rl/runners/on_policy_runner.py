@@ -182,7 +182,8 @@ class OnPolicyRunner:
                     actions = self.alg.act(obs, critic_obs, infos, hist_encoding)
                     obs, privileged_obs, rewards, dones, infos = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
                     critic_obs = privileged_obs if privileged_obs is not None else obs
-                    obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
+                    rewards = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in rewards.items()}
+                    obs, critic_obs, dones = obs.to(self.device), critic_obs.to(self.device), dones.to(self.device)
                     total_rew = self.alg.process_env_step(rewards, dones, infos)
                     
                     if self.log_dir is not None:
