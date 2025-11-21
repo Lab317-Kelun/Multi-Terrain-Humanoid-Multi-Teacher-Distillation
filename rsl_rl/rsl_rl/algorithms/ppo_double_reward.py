@@ -111,6 +111,10 @@ class PPODoubleReward:
         self.priv_reg_coef_schedual = priv_reg_coef_schedual
         self.counter = 0
         
+        # Terrain Onehot History Encoder (CNN)
+        self.terrain_onehot_history_encoder_optimizer = optim.Adam(self.actor_critic.actor.terrain_onehot_history_encoder.parameters(), lr=learning_rate, eps=adam_epsilon)
+
+        
          # Estimator
         self.estimator = estimator
         self.priv_states_dim = estimator_paras["priv_states_dim"]
@@ -256,6 +260,12 @@ class PPODoubleReward:
             priv_reg_stage = min(max((self.counter - self.priv_reg_coef_schedual[2]), 0) / self.priv_reg_coef_schedual[3], 1)
             priv_reg_coef = self.priv_reg_coef_schedual[0] + (self.priv_reg_coef_schedual[1] - self.priv_reg_coef_schedual[0]) * priv_reg_stage
 
+            # Terrain Onehot module update
+            terrain_onehot_batch = self.actor_critic.actor.infer_terrain_onehot(obs_batch)  # 真实onehot -> encoder
+            with torch.inference_mode():
+                hist_terrain_onehot_batch = self.actor_critic.actor.infer_hist_terrain_onehot(obs_batch)  # 历史 -> CNN预测 -> encoder
+            terrain_onehot_loss = (terrain_onehot_batch - hist_terrain_onehot_batch.detach()).norm(p=2, dim=1).mean()
+
             # Estimator
             # priv_states_predicted = self.estimator(obs_batch[:, :self.num_prop])  # obs in batch is with true priv_states
             hist = obs_batch[:, -self.num_hist*self.num_prop:]  # 展平的历史观测: (batch, num_hist*num_prop)
@@ -371,6 +381,7 @@ class PPODoubleReward:
      
     def update_dagger(self):
         mean_hist_latent_loss = 0
+        mean_hist_terrain_onehot_loss = 0
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
@@ -390,12 +401,25 @@ class PPODoubleReward:
                 nn.utils.clip_grad_norm_(self.actor_critic.actor.history_encoder.parameters(), self.max_grad_norm)
                 self.hist_encoder_optimizer.step()
                 
+                # Terrain Onehot module update
+        
+                with torch.inference_mode():
+                    terrain_onehot_batch = self.actor_critic.actor.infer_terrain_onehot(obs_batch)  # 真实onehot -> encoder
+                hist_terrain_onehot_batch = self.actor_critic.actor.infer_hist_terrain_onehot(obs_batch)  # 历史 -> CNN预测 -> encoder
+                hist_terrain_onehot_loss = (terrain_onehot_batch.detach() - hist_terrain_onehot_batch).norm(p=2, dim=1).mean()
+                self.terrain_onehot_history_encoder_optimizer.zero_grad()
+                hist_terrain_onehot_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor_critic.actor.terrain_onehot_history_encoder.parameters(), self.max_grad_norm)
+                self.terrain_onehot_history_encoder_optimizer.step()
+                
                 mean_hist_latent_loss += hist_latent_loss.item()
+                mean_hist_terrain_onehot_loss += hist_terrain_onehot_loss.item()
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_hist_latent_loss /= num_updates
+        mean_hist_terrain_onehot_loss /= num_updates
         self.storage.clear()
         self.update_counter()
-        return mean_hist_latent_loss
+        return mean_hist_latent_loss, mean_hist_terrain_onehot_loss
 
     def update_depth_encoder(self, depth_latent_batch, scandots_latent_batch):
         pass

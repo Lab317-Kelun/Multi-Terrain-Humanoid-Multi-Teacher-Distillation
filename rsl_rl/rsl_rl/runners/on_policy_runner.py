@@ -64,6 +64,7 @@ class OnPolicyRunner:
         self.policy_cfg = train_cfg["policy"]
         self.estimator_cfg = train_cfg["estimator"]
         self.depth_encoder_cfg = train_cfg["depth_encoder"]
+        self.terrain_onehot_estimator_cfg = train_cfg.get("terrain_onehot_estimator", {})
         self.device = device
         self.env = env
 
@@ -104,6 +105,7 @@ class OnPolicyRunner:
                 'num_priv_latent': self.env.cfg.env.n_priv_latent,
                 'num_priv_explicit': self.env.cfg.env.n_priv,
                 'num_hist': self.env.cfg.env.history_len,
+                'num_terrain_onehot': self.env.cfg.env.n_terrain_onehot,
                 'num_actions': self.env.num_actions,
                 **self.policy_cfg
             }
@@ -168,8 +170,11 @@ class OnPolicyRunner:
                                       device=self.device, **self.alg_cfg)
         else:
             self.alg: PPO = alg_class(actor_critic, 
-                                      estimator, self.estimator_cfg, 
-                                      depth_encoder, self.depth_encoder_cfg, depth_actor,
+                                      estimator=estimator,
+                                      estimator_paras=self.estimator_cfg,
+                                      depth_encoder=depth_encoder,
+                                      depth_encoder_paras=self.depth_encoder_cfg,
+                                      depth_actor=depth_actor,
                                       device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
@@ -282,12 +287,12 @@ class OnPolicyRunner:
             
             # Learning step - 适配不同的算法返回值
             if self.alg.use_double_critic:
-                mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse = self.alg.update()
+                mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse, mean_terrain_onehot_loss = self.alg.update()
             else:
-                mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_disc_loss, mean_disc_acc, mean_priv_reg_loss, priv_reg_coef = self.alg.update()
+                mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_disc_loss, mean_disc_acc, mean_priv_reg_loss, priv_reg_coef, mean_terrain_onehot_loss = self.alg.update()
             if hist_encoding:
                 print("Updating dagger...")
-                mean_hist_latent_loss = self.alg.update_dagger()
+                mean_hist_latent_loss, mean_hist_terrain_onehot_loss = self.alg.update_dagger()
             
             stop = time.time()
             learn_time = stop - start
