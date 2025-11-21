@@ -54,6 +54,7 @@ class DistillationRunner(OnPolicyRunner):
         # Query observations from environment for algorithm construction
         raw_obs = self.env.get_observations()
         obs, self.cfg["obs_groups"] = resolve_obs_groups(raw_obs, self.cfg["obs_groups"], default_sets=["teacher"])
+        print(f"INFO:Resolved observation groups: {self.cfg['obs_groups']}")
         obs = obs.to(self.device)
 
         # Create the algorithm

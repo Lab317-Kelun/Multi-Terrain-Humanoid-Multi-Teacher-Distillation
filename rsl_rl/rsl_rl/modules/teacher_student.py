@@ -94,6 +94,15 @@ class MultiStudentTeacher(nn.Module):
             raise ValueError(
                 "student_num_prop and student_num_scan must be provided to use Actor architecture for student."
             )
+        print(f"Building MultiStudentTeacher with student_num_obs={num_student_obs}, teacher_num_obs={num_teacher_obs}")
+        print(f"Student obs groups: {obs_groups['policy']}")
+        print(f"Teacher obs groups: {obs_groups['teacher']}")
+        print("INFO:Student_num_prop:", student_num_prop)
+        print("INFO:Student_num_scan:", student_num_scan)
+        print("INFO:Student_num_priv_latent:", student_num_priv_latent)
+        print("INFO:Student_num_priv_explicit:", student_num_priv_explicit)
+        print("INFO:Student_num_hist:", student_num_hist)
+        print("INFO::priv_encoder_dims", priv_encoder_dims)
         self.student = Actor(
             num_prop=student_num_prop,
             num_scan=student_num_scan,

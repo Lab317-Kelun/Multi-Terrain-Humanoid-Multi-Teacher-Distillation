@@ -38,6 +38,7 @@ def build_distillation_cfg(env_cfg) -> Dict:
         "policy": ["proprio", "scan", "history"],
         "teacher": ["proprio", "scan", "priv_explicit", "priv_latent", "history"],
     }
+    
 
     policy_defaults = HumanoidBEAMDOJOCfgPPO.policy
     runner_defaults = HumanoidBEAMDOJOCfgPPO.runner

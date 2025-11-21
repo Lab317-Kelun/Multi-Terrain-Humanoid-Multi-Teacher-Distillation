@@ -216,6 +216,7 @@ def get_args():
         {"name": "--teacher_checkpoint", "type": str, "help": "Path to the trained teacher checkpoint for distillation."},
         {"name": "--student_checkpoint", "type": str, "help": "Optional student checkpoint to resume distillation."},
         {"name": "--distill_iters", "type": int, "help": "Number of distillation iterations to run."},
+        {"name": "--checkpoint_path", "type": str, "help": "Path to checkpoint file or checkpoint number"},
     
     ]
     

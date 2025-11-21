@@ -49,8 +49,8 @@ def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
 def play(args):
     faulthandler.enable()
     exptid = args.exptid
-    log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
-
+    #log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
+    log_pth = args.checkpoint_path
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     if args.nodelay:

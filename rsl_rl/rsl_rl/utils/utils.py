@@ -137,7 +137,7 @@ def resolve_obs_groups(obs: Union[torch.Tensor, TensorDict],
     group_slices: Dict[str, slice] = {}
     for name, spec in group_defs.items():
         if "start" not in spec:
-            raise ValueError(f"Observation group '{name}' is missing 'start' index.")
+            raise ValueError(f"    group '{name}' is missing 'start' index.")
         start = int(spec["start"])
         if "length" in spec:
             end = start + int(spec["length"])
