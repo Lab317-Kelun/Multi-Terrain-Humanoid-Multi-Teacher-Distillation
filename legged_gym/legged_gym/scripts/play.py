@@ -61,7 +61,7 @@ def play(args):
     env_cfg.commands.resampling_time = 4
     env_cfg.rewards.is_play = True
 
-    env_cfg.terrain.num_rows = 1
+    env_cfg.terrain.num_rows = 8
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.max_init_terrain_level = 0
 

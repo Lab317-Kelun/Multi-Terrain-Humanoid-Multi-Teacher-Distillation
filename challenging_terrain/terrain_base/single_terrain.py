@@ -774,7 +774,7 @@ class single_terrain:
         #     return terrain, goals, start_x + length_x_grid
 
         min_gap_m = 0.02
-        max_gap_m = 0.4
+        max_gap_m = 0.35
         stone_distance = min_gap_m + (max_gap_m - min_gap_m) * difficulty_clamped
         stone_distance_grid = max(1, round(stone_distance / terrain.horizontal_scale))
         stone_size_grid = max(1, round(platform_size / terrain.horizontal_scale))
