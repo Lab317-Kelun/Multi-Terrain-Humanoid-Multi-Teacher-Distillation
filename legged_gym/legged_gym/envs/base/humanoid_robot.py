@@ -666,7 +666,7 @@ class HumanoidRobot(BaseTask):
         
         # 地形ID的onehot编码（硬编码：平地ID=3对应[1,0,0,0,0]）
         self.terrain_onehot[:, 0] = 1.0  # 平地 -> [1,0,0,0,0]
-        print(f"self.terrain_onehot: {self.terrain_onehot}")
+        # print(f"self.terrain_onehot: {self.terrain_onehot}")
         
         if self.cfg.terrain.measure_heights:
             # heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
@@ -1104,6 +1104,7 @@ class HumanoidRobot(BaseTask):
             
             elif curriculum_cfg.success_mode == 'vel_tracking':
                 # 速度模式：判断是否达到指定速度
+                max
                 is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
                 success_threshold = curriculum_cfg.velocity_success_threshold
                 failure_threshold = curriculum_cfg.velocity_failure_threshold

@@ -64,7 +64,6 @@ class OnPolicyRunner:
         self.policy_cfg = train_cfg["policy"]
         self.estimator_cfg = train_cfg["estimator"]
         self.depth_encoder_cfg = train_cfg["depth_encoder"]
-        self.terrain_onehot_estimator_cfg = train_cfg.get("terrain_onehot_estimator", {})
         self.device = device
         self.env = env
 
@@ -213,6 +212,7 @@ class OnPolicyRunner:
         mean_disc_loss = 0.
         mean_disc_acc = 0.
         mean_hist_latent_loss = 0.
+        mean_hist_terrain_onehot_loss = 0.
         mean_priv_reg_loss = 0. 
         priv_reg_coef = 0.
         entropy_coef = 0.
@@ -546,6 +546,12 @@ class OnPolicyRunner:
         wandb_dict['Loss/entropy_coef'] = locs['entropy_coef']
         wandb_dict['Loss/learning_rate'] = self.alg.learning_rate
         
+        # Terrain Onehot相关损失
+        if 'mean_terrain_onehot_loss' in locs:
+            wandb_dict['Loss/terrain_onehot_reg_loss'] = locs['mean_terrain_onehot_loss']
+        if 'mean_hist_terrain_onehot_loss' in locs:
+            wandb_dict['Loss/hist_terrain_onehot_loss'] = locs['mean_hist_terrain_onehot_loss']
+        
         # Discriminator loss (可能来自AMP)
         if 'mean_discriminator_loss' in locs:
             wandb_dict['Loss/discriminator'] = locs['mean_discriminator_loss']
@@ -645,6 +651,19 @@ class OnPolicyRunner:
             'iter': self.current_learning_iteration,
             'infos': infos,
             }
+        
+        # 保存历史编码器优化器
+        if hasattr(self.alg, 'hist_encoder_optimizer') and self.alg.hist_encoder_optimizer is not None:
+            state_dict['hist_encoder_optimizer_state_dict'] = self.alg.hist_encoder_optimizer.state_dict()
+        
+        # 保存terrain onehot历史编码器优化器
+        if hasattr(self.alg, 'terrain_onehot_history_encoder_optimizer') and self.alg.terrain_onehot_history_encoder_optimizer is not None:
+            state_dict['terrain_onehot_history_encoder_optimizer_state_dict'] = self.alg.terrain_onehot_history_encoder_optimizer.state_dict()
+        
+        # 保存Estimator优化器
+        if hasattr(self.alg, 'estimator_optimizer') and self.alg.estimator_optimizer is not None:
+            state_dict['estimator_optimizer_state_dict'] = self.alg.estimator_optimizer.state_dict()
+        
         if self.if_depth:
             state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
             state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
@@ -698,16 +717,48 @@ class OnPolicyRunner:
                 print("No saved depth actor, Copying actor critic actor to depth actor...")
                 self.alg.depth_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
         
-        # 加载优化器（包括discriminator优化器）
+        # 加载优化器（包括所有优化器）
         if load_optimizer:
             try:
-                # 尝试加载优化器状态
+                # 加载主优化器（Actor-Critic）
                 self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-                print("[Load] 成功加载主优化器状态")
+                print("[Load] 成功加载主优化器状态（Actor-Critic）")
             except (ValueError, KeyError) as e:
-                # 如果参数组不匹配（例如：旧模型没有discriminator参数），跳过优化器加载
-                print(f"[Load] 警告: 无法加载优化器状态: {e}")
-                print("[Load] 优化器将使用初始状态（这对于从非AMP模型恢复是正常的）")
+                print(f"[Load] 警告: 无法加载主优化器状态: {e}")
+                print("[Load] 优化器将使用初始状态")
+            
+            # 加载历史编码器优化器
+            if hasattr(self.alg, 'hist_encoder_optimizer') and self.alg.hist_encoder_optimizer is not None:
+                if 'hist_encoder_optimizer_state_dict' in loaded_dict:
+                    try:
+                        self.alg.hist_encoder_optimizer.load_state_dict(loaded_dict['hist_encoder_optimizer_state_dict'])
+                        print("[Load] 成功加载历史编码器优化器状态")
+                    except (ValueError, KeyError) as e:
+                        print(f"[Load] 警告: 无法加载历史编码器优化器状态: {e}")
+                else:
+                    print("[Load] checkpoint中没有历史编码器优化器状态，将使用初始状态")
+            
+            # 加载terrain onehot历史编码器优化器
+            if hasattr(self.alg, 'terrain_onehot_history_encoder_optimizer') and self.alg.terrain_onehot_history_encoder_optimizer is not None:
+                if 'terrain_onehot_history_encoder_optimizer_state_dict' in loaded_dict:
+                    try:
+                        self.alg.terrain_onehot_history_encoder_optimizer.load_state_dict(loaded_dict['terrain_onehot_history_encoder_optimizer_state_dict'])
+                        print("[Load] 成功加载terrain onehot历史编码器优化器状态")
+                    except (ValueError, KeyError) as e:
+                        print(f"[Load] 警告: 无法加载terrain onehot历史编码器优化器状态: {e}")
+                else:
+                    print("[Load] checkpoint中没有terrain onehot历史编码器优化器状态，将使用初始状态")
+            
+            # 加载Estimator优化器
+            if hasattr(self.alg, 'estimator_optimizer') and self.alg.estimator_optimizer is not None:
+                if 'estimator_optimizer_state_dict' in loaded_dict:
+                    try:
+                        self.alg.estimator_optimizer.load_state_dict(loaded_dict['estimator_optimizer_state_dict'])
+                        print("[Load] 成功加载Estimator优化器状态")
+                    except (ValueError, KeyError) as e:
+                        print(f"[Load] 警告: 无法加载Estimator优化器状态: {e}")
+                else:
+                    print("[Load] checkpoint中没有Estimator优化器状态，将使用初始状态")
             
             # 如果算法有discriminator优化器，尝试加载
             if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:

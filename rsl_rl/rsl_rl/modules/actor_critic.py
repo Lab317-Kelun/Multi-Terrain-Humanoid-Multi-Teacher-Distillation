@@ -118,7 +118,7 @@ class TerrainOnehotHistoryEncoder(nn.Module):
             raise(ValueError("tsteps must be 10, 20 or 50"))
 
         self.linear_output = nn.Sequential(
-                nn.Linear(channel_size * 3, output_size)
+                nn.Linear(channel_size * 3, output_size), self.activation_fn
                 )
 
     def forward(self, obs):
@@ -127,9 +127,9 @@ class TerrainOnehotHistoryEncoder(nn.Module):
         T = self.tsteps
         projection = self.encoder(obs.reshape([nd * T, -1]))
         output = self.conv_layers(projection.reshape([nd, T, -1]).permute((0, 2, 1)))
-        logits = self.linear_output(output)
-        # 使用softmax得到onehot概率分布
-        return torch.softmax(logits, dim=-1)
+        # 直接输出编码后的特征，维度为output_size（与terrain_onehot_encoder输出维度一致）
+        # 注意：这里不输出softmax，因为要与terrain_onehot_encoder的输出比较
+        return self.linear_output(output)
 
 
 class CNNScanEncoder(nn.Module):
@@ -556,6 +556,7 @@ class ActorCriticRMADoubleReward(nn.Module):
         self.kwargs = kwargs
         self.use_double_critic = use_double_critic
         priv_encoder_dims= kwargs.get('priv_encoder_dims', [])
+        terrain_onehot_encoder_dims = kwargs.get('terrain_onehot_encoder_dims', [])
         tanh_encoder_output = kwargs.get('tanh_encoder_output', False)
         scan_encoder_type = kwargs.get('scan_encoder_type', 'mlp')
         scan_cnn_channels = kwargs.get('scan_cnn_channels')
@@ -574,6 +575,7 @@ class ActorCriticRMADoubleReward(nn.Module):
             scan_encoder_dims,
             actor_hidden_dims,
             priv_encoder_dims,
+            terrain_onehot_encoder_dims,
             num_priv_latent,
             num_priv_explicit,
             num_hist,

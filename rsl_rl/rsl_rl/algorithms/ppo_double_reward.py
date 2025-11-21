@@ -222,6 +222,7 @@ class PPODoubleReward:
         mean_surrogate_loss = 0
         mean_estimator_loss = 0
         mean_priv_reg_loss = 0
+        mean_terrain_onehot_loss = 0
         mean_discriminator_loss = 0
         mean_discriminator_acc = 0
         # 根据是否使用双Critic选择合适的generator
@@ -338,12 +339,30 @@ class PPODoubleReward:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
             # Total loss
+            # 总损失包含4部分：
+            # 1. surrogate_loss: 策略损失，影响Actor的actor_backbone（通过actions_log_prob_batch）
+            # 2. value_loss: 价值函数损失，影响Critic
+            # 3. entropy_batch.mean(): 熵损失，影响Actor的actor_backbone（鼓励探索）
+            # 4. priv_reg_loss: privileged信息正则化损失，影响Actor的priv_encoder
+            # 5. terrain_onehot_loss: terrain onehot正则化损失，影响Actor的terrain_onehot_encoder
+            # 
+            # 注意：priv_encoder和terrain_onehot_encoder是Actor的一部分，它们：
+            # - 在Actor.forward()中被使用（计算latent和hist_terrain_onehot_latent，影响surrogate_loss）
+            # - 同时通过priv_reg_loss和terrain_onehot_loss进行正则化
+            # - 通过self.optimizer（包含整个actor_critic的参数）一起优化
             loss = surrogate_loss + \
                    self.value_loss_coef * value_loss - \
                    self.entropy_coef * entropy_batch.mean() + \
-                   priv_reg_coef * priv_reg_loss
+                   priv_reg_coef * priv_reg_loss + \
+                   priv_reg_coef * terrain_onehot_loss  # 使用相同的系数
 
             # Gradient step
+            # loss.backward()会将梯度传播到所有参与计算的参数：
+            # - surrogate_loss的梯度 -> actor_backbone, priv_encoder, terrain_onehot_encoder等
+            # - value_loss的梯度 -> critic
+            # - priv_reg_loss的梯度 -> priv_encoder
+            # - terrain_onehot_loss的梯度 -> terrain_onehot_encoder
+            # 然后self.optimizer.step()会更新所有参数（包括priv_encoder和terrain_onehot_encoder）
             self.optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
@@ -353,6 +372,7 @@ class PPODoubleReward:
             mean_surrogate_loss += surrogate_loss.item()
             mean_estimator_loss += estimator_loss.item()
             mean_priv_reg_loss += priv_reg_loss.item()
+            mean_terrain_onehot_loss += terrain_onehot_loss.item()
             mean_discriminator_loss += 0
             mean_discriminator_acc += 0
 
@@ -361,6 +381,7 @@ class PPODoubleReward:
         mean_surrogate_loss /= num_updates
         mean_estimator_loss /= num_updates
         mean_priv_reg_loss /= num_updates
+        mean_terrain_onehot_loss /= num_updates
         mean_discriminator_loss /= num_updates
         mean_discriminator_acc /= num_updates
         
@@ -372,9 +393,9 @@ class PPODoubleReward:
         self.update_counter()
 
         if self.use_double_critic: 
-            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse
+            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse, mean_terrain_onehot_loss
         else:
-            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef
+            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_terrain_onehot_loss
 
     def update_counter(self):
         self.counter += 1
@@ -429,6 +450,5 @@ class PPODoubleReward:
 
     def update_depth_both(self, depth_latent_batch, scandots_latent_batch, actions_student_batch, actions_teacher_batch):
         pass
-
     def compute_apt_reward(self, source, target):
         pass
