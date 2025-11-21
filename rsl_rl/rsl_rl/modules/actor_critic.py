@@ -316,7 +316,7 @@ class Actor(nn.Module):
                 hist_terrain_onehot_latent = self.infer_hist_terrain_onehot(obs)
             else:
                 hist_terrain_onehot_latent = self.infer_terrain_onehot(obs)
-            backbone_input = torch.cat([obs_prop_scan, obs_priv_explicit, obs_terrain_onehot, latent, hist_terrain_onehot_latent], dim=1)
+            backbone_input = torch.cat([obs_prop_scan, obs_priv_explicit, latent, hist_terrain_onehot_latent], dim=1)
             backbone_output = self.actor_backbone(backbone_input)
             return backbone_output
         else:
@@ -339,7 +339,7 @@ class Actor(nn.Module):
                 hist_terrain_onehot_latent = self.infer_hist_terrain_onehot(obs)
             else:
                 hist_terrain_onehot_latent = self.infer_terrain_onehot(obs)
-            backbone_input = torch.cat([obs_prop_scan, obs_priv_explicit, obs_terrain_onehot, latent, hist_terrain_onehot_latent], dim=1)
+            backbone_input = torch.cat([obs_prop_scan, obs_priv_explicit, latent, hist_terrain_onehot_latent], dim=1)
             backbone_output = self.actor_backbone(backbone_input)
             return backbone_output
     
