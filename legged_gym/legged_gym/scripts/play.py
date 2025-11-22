@@ -104,7 +104,21 @@ def play(args):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
+    # 获取配置参数
+    n_proprio = env.cfg.env.n_proprio
+    n_scan = env.cfg.env.n_scan
+    history_len = env.cfg.env.history_len
+    n_priv_explicit = env.cfg.env.n_priv  # priv_explicit 维度
+
     for i in range(10*int(env.max_episode_length)):
+        # 使用 estimator 估计隐式特权信息
+        # 历史观测位于观测的最后 history_len * n_proprio 维
+        hist_obs = obs[:, -history_len * n_proprio:]
+        # 使用 estimator 估计 priv_explicit
+        priv_explicit_estimated = estimator(hist_obs)
+        # 将估计的 priv_explicit 替换到观测中的相应位置
+        # priv_explicit 的位置：n_proprio + n_scan 到 n_proprio + n_scan + n_priv_explicit
+        obs[:, n_proprio + n_scan : n_proprio + n_scan + n_priv_explicit] = priv_explicit_estimated
        
         if env.cfg.depth.use_camera:
             if infos["depth"] is not None:
