@@ -63,10 +63,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
         n_proprio = 75  # 实际obs_buf维度：3(commands)+3(ang_vel)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=75
         history_len = 10
-        n_terrain_onehot = 5  # 地形ID的onehot编码维度（例如：平地=10000, GAP=01000）
         
         # 重新计算总观测维度
-        num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv + n_terrain_onehot
+        num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv
         num_actions = 12  # 12个关节动作
         
         # 启用接触信息
@@ -389,7 +388,6 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         # 扫描编码器配置
         scan_encoder_dims = [128, 64, 32]
         priv_encoder_dims = [64, 20]
-        terrain_onehot_encoder_dims = [64, 20]
         tanh_encoder_output = False  # 编码器输出是否使用tanh激活
         
         # 支持双Critic的编码器

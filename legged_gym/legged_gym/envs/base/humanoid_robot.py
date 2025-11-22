@@ -664,16 +664,12 @@ class HumanoidRobot(BaseTask):
             self.motor_strength[1][:, :12] - 1
         ), dim=-1)
         
-        # 地形ID的onehot编码（硬编码：平地ID=3对应[1,0,0,0,0]）
-        self.terrain_onehot[:, 0] = 1.0  # 平地 -> [1,0,0,0,0]
-        # print(f"self.terrain_onehot: {self.terrain_onehot}")
-        
         if self.cfg.terrain.measure_heights:
             # heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.3 - self.measured_heights, -1, 1.)
             heights = self.root_states[:, 2].unsqueeze(1) - self.measured_heights
-            self.obs_buf = torch.cat([obs_buf, heights, priv_explicit, priv_latent, self.terrain_onehot, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+            self.obs_buf = torch.cat([obs_buf, heights, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
         else:
-            self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.terrain_onehot, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+            self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
 
         self.obs_history_buf = torch.where(
             (self.episode_length_buf <= 1)[:, None, None], 
@@ -1207,7 +1203,6 @@ class HumanoidRobot(BaseTask):
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-        self.terrain_onehot = torch.zeros(self.num_envs, self.cfg.env.n_terrain_onehot, device=self.device, dtype=torch.float, requires_grad=False)
         
         # 初始化步态相位相关变量
         self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)

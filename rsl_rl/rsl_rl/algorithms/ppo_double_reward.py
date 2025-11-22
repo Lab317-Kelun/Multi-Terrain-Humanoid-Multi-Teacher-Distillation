@@ -110,9 +110,6 @@ class PPODoubleReward:
         self.hist_encoder_optimizer = optim.Adam(self.actor_critic.actor.history_encoder.parameters(), lr=learning_rate, eps=adam_epsilon)
         self.priv_reg_coef_schedual = priv_reg_coef_schedual
         self.counter = 0
-        
-        # Terrain Onehot History Encoder (CNN)
-        self.terrain_onehot_history_encoder_optimizer = optim.Adam(self.actor_critic.actor.terrain_onehot_history_encoder.parameters(), lr=learning_rate, eps=adam_epsilon)
 
         
          # Estimator
@@ -234,7 +231,6 @@ class PPODoubleReward:
         mean_surrogate_loss = 0
         mean_estimator_loss = 0
         mean_priv_reg_loss = 0
-        mean_terrain_onehot_loss = 0
         mean_discriminator_loss = 0
         mean_discriminator_acc = 0
         # 根据是否使用双Critic选择合适的generator
@@ -272,12 +268,6 @@ class PPODoubleReward:
             priv_reg_loss = (priv_latent_batch - hist_latent_batch.detach()).norm(p=2, dim=1).mean()
             priv_reg_stage = min(max((self.counter - self.priv_reg_coef_schedual[2]), 0) / self.priv_reg_coef_schedual[3], 1)
             priv_reg_coef = self.priv_reg_coef_schedual[0] + (self.priv_reg_coef_schedual[1] - self.priv_reg_coef_schedual[0]) * priv_reg_stage
-
-            # Terrain Onehot module update
-            terrain_onehot_batch = self.actor_critic.actor.infer_terrain_onehot(obs_batch)  # 真实onehot -> encoder
-            with torch.inference_mode():
-                hist_terrain_onehot_batch = self.actor_critic.actor.infer_hist_terrain_onehot(obs_batch)  # 历史 -> CNN预测 -> encoder
-            terrain_onehot_loss = (terrain_onehot_batch - hist_terrain_onehot_batch.detach()).norm(p=2, dim=1).mean()
 
             # Estimator
             # priv_states_predicted = self.estimator(obs_batch[:, :self.num_prop])  # obs in batch is with true priv_states
@@ -356,25 +346,22 @@ class PPODoubleReward:
             # 2. value_loss: 价值函数损失，影响Critic
             # 3. entropy_batch.mean(): 熵损失，影响Actor的actor_backbone（鼓励探索）
             # 4. priv_reg_loss: privileged信息正则化损失，影响Actor的priv_encoder
-            # 5. terrain_onehot_loss: terrain onehot正则化损失，影响Actor的terrain_onehot_encoder
             # 
-            # 注意：priv_encoder和terrain_onehot_encoder是Actor的一部分，它们：
-            # - 在Actor.forward()中被使用（计算latent和hist_terrain_onehot_latent，影响surrogate_loss）
-            # - 同时通过priv_reg_loss和terrain_onehot_loss进行正则化
+            # 注意：priv_encoder是Actor的一部分，它：
+            # - 在Actor.forward()中被使用（计算latent，影响surrogate_loss）
+            # - 同时通过priv_reg_loss进行正则化
             # - 通过self.optimizer（包含整个actor_critic的参数）一起优化
             loss = surrogate_loss + \
                    self.value_loss_coef * value_loss - \
                    self.entropy_coef * entropy_batch.mean() + \
-                   priv_reg_coef * priv_reg_loss + \
-                   priv_reg_coef * terrain_onehot_loss  # 使用相同的系数
+                   priv_reg_coef * priv_reg_loss
 
             # Gradient step
             # loss.backward()会将梯度传播到所有参与计算的参数：
-            # - surrogate_loss的梯度 -> actor_backbone, priv_encoder, terrain_onehot_encoder等
+            # - surrogate_loss的梯度 -> actor_backbone, priv_encoder等
             # - value_loss的梯度 -> critic
             # - priv_reg_loss的梯度 -> priv_encoder
-            # - terrain_onehot_loss的梯度 -> terrain_onehot_encoder
-            # 然后self.optimizer.step()会更新所有参数（包括priv_encoder和terrain_onehot_encoder）
+            # 然后self.optimizer.step()会更新所有参数（包括priv_encoder）
             self.optimizer.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
@@ -384,7 +371,6 @@ class PPODoubleReward:
             mean_surrogate_loss += surrogate_loss.item()
             mean_estimator_loss += estimator_loss.item()
             mean_priv_reg_loss += priv_reg_loss.item()
-            mean_terrain_onehot_loss += terrain_onehot_loss.item()
             mean_discriminator_loss += 0
             mean_discriminator_acc += 0
 
@@ -393,7 +379,6 @@ class PPODoubleReward:
         mean_surrogate_loss /= num_updates
         mean_estimator_loss /= num_updates
         mean_priv_reg_loss /= num_updates
-        mean_terrain_onehot_loss /= num_updates
         mean_discriminator_loss /= num_updates
         mean_discriminator_acc /= num_updates
         
@@ -405,16 +390,15 @@ class PPODoubleReward:
         self.update_counter()
 
         if self.use_double_critic: 
-            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse, mean_terrain_onehot_loss
+            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse
         else:
-            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_terrain_onehot_loss
+            return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef
 
     def update_counter(self):
         self.counter += 1
      
     def update_dagger(self):
         mean_hist_latent_loss = 0
-        mean_hist_terrain_onehot_loss = 0
         if self.actor_critic.is_recurrent:
             generator = self.storage.reccurent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
@@ -434,25 +418,12 @@ class PPODoubleReward:
                 nn.utils.clip_grad_norm_(self.actor_critic.actor.history_encoder.parameters(), self.max_grad_norm)
                 self.hist_encoder_optimizer.step()
                 
-                # Terrain Onehot module update
-        
-                with torch.inference_mode():
-                    terrain_onehot_batch = self.actor_critic.actor.infer_terrain_onehot(obs_batch)  # 真实onehot -> encoder
-                hist_terrain_onehot_batch = self.actor_critic.actor.infer_hist_terrain_onehot(obs_batch)  # 历史 -> CNN预测 -> encoder
-                hist_terrain_onehot_loss = (terrain_onehot_batch.detach() - hist_terrain_onehot_batch).norm(p=2, dim=1).mean()
-                self.terrain_onehot_history_encoder_optimizer.zero_grad()
-                hist_terrain_onehot_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor_critic.actor.terrain_onehot_history_encoder.parameters(), self.max_grad_norm)
-                self.terrain_onehot_history_encoder_optimizer.step()
-                
                 mean_hist_latent_loss += hist_latent_loss.item()
-                mean_hist_terrain_onehot_loss += hist_terrain_onehot_loss.item()
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_hist_latent_loss /= num_updates
-        mean_hist_terrain_onehot_loss /= num_updates
         self.storage.clear()
         self.update_counter()
-        return mean_hist_latent_loss, mean_hist_terrain_onehot_loss
+        return mean_hist_latent_loss
 
     def update_depth_encoder(self, depth_latent_batch, scandots_latent_batch):
         pass
