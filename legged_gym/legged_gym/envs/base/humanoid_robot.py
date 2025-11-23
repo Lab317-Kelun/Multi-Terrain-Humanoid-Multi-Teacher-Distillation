@@ -494,7 +494,7 @@ class HumanoidRobot(BaseTask):
         for key in self.episode_sums.keys():
             self.extras["episode"]['rew_' + key] = torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
             self.episode_sums[key][env_ids] = 0.
-        self.episode_length_buf[env_ids] = 0
+        
 
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
@@ -504,6 +504,14 @@ class HumanoidRobot(BaseTask):
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
+
+        self.extras["episode"]["max_episode_length_s"] = self.max_episode_length_s
+        
+        episode_time = torch.mean((self.episode_length_buf[env_ids]).float()) * self.dt  
+        print("Episode time:", self.episode_length_buf[env_ids].float())
+        self.extras["episode"]["success_rate"] = episode_time / self.max_episode_length_s
+
+        self.episode_length_buf[env_ids] = 0
         
     def compute_reward(self):
         """ Compute rewards

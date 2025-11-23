@@ -196,6 +196,10 @@ class DistillationRunner(OnPolicyRunner):
         # 添加算法返回的 loss
         log_dict.update({f"Loss/{k}": v for k, v in locs["loss_dict"].items()})
 
+        if len(locs["ep_infos"]) > 0:
+            for key in locs["ep_infos"][0]:
+                log_dict[f"Episode/{key}"] = statistics.mean([float(ep_info[key]) for ep_info in locs["ep_infos"]])
+
         # 写入日志
         if self.writer is not None and self.logger_type in {"wandb", "tensorboard", "neptune"}:
             for k, v in log_dict.items():
@@ -230,7 +234,7 @@ class DistillationRunner(OnPolicyRunner):
         if self.is_distributed:
             print(f"Synchronizing parameters for rank {self.gpu_global_rank}...")
             self.alg.broadcast_parameters()
-
+        
         # Start training
         start_iter = self.current_learning_iteration
         tot_iter = start_iter + num_learning_iterations
@@ -241,10 +245,13 @@ class DistillationRunner(OnPolicyRunner):
                 for _ in range(self.num_steps_per_env):
                     # Sample actions
                     actions = self.alg.act(obs)
+                    
                     # Step the environment
                     obs_tensor, _, rewards, dones, extras = self.env.step(actions.to(self.env.device))
                     # Move to device and wrap observations
+                    
                     obs = tensor_to_obs_groups(obs_tensor, self.cfg["obs_groups"]).to(self.device)
+                    
                     rewards = rewards.to(self.device).unsqueeze(-1)
                     dones = dones.to(self.device).unsqueeze(-1)
                     # Process the step

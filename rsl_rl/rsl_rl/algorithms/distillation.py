@@ -46,8 +46,8 @@ class DistillationStorage:
         self.dones.append(transition.dones.clone())
 
     def generator(self):
-        for obs, teacher_act, dones in zip(self.observations, self.teacher_actions, self.dones):
-            yield obs, None, teacher_act, dones
+        for i in range(self.num_transitions_per_env):
+            yield self.observations[i], None, self.teacher_actions[i], self.dones[i]
 
     def clear(self) -> None:
         self.observations: list[TensorDict] = []
@@ -132,7 +132,7 @@ class Distillation:
         self.transition.actions = self.policy.act(obs).detach()
         self.transition.privileged_actions = self.policy.evaluate(obs).detach()
         # Record the observations
-        self.transition.observations = obs
+        self.transition.observations = obs.clone()
         return self.transition.actions
 
     def process_env_step(
@@ -153,8 +153,7 @@ class Distillation:
 
     def update(self) -> Dict[str, float]:
         self.num_updates += 1
-        mean_behavior_loss = 0
-        loss = 0
+        mean_behavior_loss = 0.0
         cnt = 0
 
         for epoch in range(self.num_learning_epochs):
@@ -162,38 +161,64 @@ class Distillation:
             self.policy.detach_hidden_states()
             if self.storage is None:
                 raise RuntimeError("Storage not initialized. Call init_storage before calling update().")
+
+            # Accumulators for the current gradient chunk
+            accum_loss = 0
+            accum_steps = 0
+
             for obs, _, privileged_actions, dones in self.storage.generator():
                 obs = obs.clone()
                 privileged_actions = privileged_actions.clone()
+                
                 # Inference of the student for gradient computation
                 actions = self.policy.act_inference(obs)
 
                 # Behavior cloning loss
-                
                 behavior_loss = self.loss_fn(actions, privileged_actions)
 
-                # Total loss
-                loss = loss + behavior_loss
+                # Accumulate loss
+                accum_loss = accum_loss + behavior_loss
+                accum_steps += 1
+
+                # Statistics
                 mean_behavior_loss += behavior_loss.item()
                 cnt += 1
 
                 # Gradient step
-                if cnt % self.gradient_length == 0:
+                if accum_steps == self.gradient_length:
                     self.optimizer.zero_grad()
-                    loss.backward()
+                    # FIX: Normalize by number of steps to prevent effective LR scaling
+                    (accum_loss / accum_steps).backward()
+                    
                     if self.is_multi_gpu:
                         self.reduce_parameters()
                     if self.max_grad_norm:
                         nn.utils.clip_grad_norm_(self.policy.student.parameters(), self.max_grad_norm)
                     self.optimizer.step()
                     self.policy.detach_hidden_states()
-                    loss = 0
+                    
+                    # Reset accumulators
+                    accum_loss = 0
+                    accum_steps = 0
 
-                # Reset dones
+                # Reset dones (RNN state handling)
                 self.policy.reset(dones.view(-1))
                 self.policy.detach_hidden_states(dones.view(-1))
-
-        mean_behavior_loss /= cnt
+            
+            # FIX: Process remaining steps at the end of the epoch
+            if accum_steps > 0:
+                self.optimizer.zero_grad()
+                (accum_loss / accum_steps).backward()
+                if self.is_multi_gpu:
+                    self.reduce_parameters()
+                if self.max_grad_norm:
+                    nn.utils.clip_grad_norm_(self.policy.student.parameters(), self.max_grad_norm)
+                self.optimizer.step()
+                self.policy.detach_hidden_states()
+                accum_loss = 0
+                accum_steps = 0
+        
+        mean_behavior_loss = mean_behavior_loss / max(cnt, 1)
         if self.storage is not None:
             self.storage.clear()
         self.last_hidden_states = self.policy.get_hidden_states()

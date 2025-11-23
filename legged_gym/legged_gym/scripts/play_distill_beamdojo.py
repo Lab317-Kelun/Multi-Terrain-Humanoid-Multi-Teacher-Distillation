@@ -179,13 +179,16 @@ def play(args):
     
     # Reset environment to get initial state
     # env.reset() # make_env usually resets
+    actions = torch.zeros(env.num_envs, 19, device=env.device, requires_grad=False)
     
-    for i in range(10000):
+    
+    for i in range(10*int(env.max_episode_length)):
         # Convert raw obs to obs_groups for the policy
         obs_groups = tensor_to_obs_groups(obs, distill_cfg["obs_groups"])
         
         with torch.no_grad():
             # Use act_inference to get student actions
+            #print("INFO:", obs_groups)
             actions = policy.act_inference(obs_groups)
         
         obs, _, rews, dones, infos = env.step(actions)

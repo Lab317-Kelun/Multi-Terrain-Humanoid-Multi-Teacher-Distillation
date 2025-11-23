@@ -214,6 +214,7 @@ class MultiStudentTeacher(nn.Module):
 
     def act_inference(self, obs: TensorDict) -> torch.Tensor:
         obs = self.get_student_obs(obs)
+
         obs = self.student_obs_normalizer(obs)
         return self.student(obs, hist_encoding=self.student_hist_encoding)
 
@@ -224,7 +225,9 @@ class MultiStudentTeacher(nn.Module):
             return self.teacher(obs, hist_encoding=self.teacher_hist_encoding)
 
     def get_student_obs(self, obs: TensorDict) -> torch.Tensor:
+        print("INFO:obs_groups in get_student_obs:", self.obs_groups["policy"])
         obs_list = [obs[obs_group] for obs_group in self.obs_groups["policy"]]
+        print("INFO:obs_list lengths:", [o.shape for o in obs_list])
         return torch.cat(obs_list, dim=-1)
 
     def get_teacher_obs(self, obs: TensorDict) -> torch.Tensor:
