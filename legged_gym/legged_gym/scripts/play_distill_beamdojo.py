@@ -149,9 +149,9 @@ def play(args):
         env.num_actions, 
         **policy_cfg
     ).to(env.device)
-    policy.eval()
+    
 
-    # 4. Load Model
+    #4. Load Model
     if args.checkpoint_path:
         load_path = args.checkpoint_path
     else:
@@ -172,6 +172,10 @@ def play(args):
         policy.load_state_dict(state_dict["model_state_dict"], strict=False)
     else:
         policy.load_state_dict(state_dict, strict=False)
+    policy.eval()
+
+    print("Policy architecture:")
+    print(policy)
 
     # 5. Play Loop
     print("Starting play loop...")
@@ -185,16 +189,96 @@ def play(args):
     for i in range(10*int(env.max_episode_length)):
         # Convert raw obs to obs_groups for the policy
         obs_groups = tensor_to_obs_groups(obs, distill_cfg["obs_groups"])
-        
+        print("obs_groups:", obs_groups)
         with torch.no_grad():
             # Use act_inference to get student actions
             #print("INFO:", obs_groups)
             actions = policy.act_inference(obs_groups)
+            #print(f"Step {i}: Actions: {actions}")
         
         obs, _, rews, dones, infos = env.step(actions)
         
         # Optional: Render if supported/enabled in env
         # env.render() 
+    # if args.checkpoint_path:
+    #     load_path = args.checkpoint_path
+    # else:
+    #     log_root = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", args.proj_name)
+    #     load_path, _ = get_load_path(log_root, load_run=args.load_run, checkpoint=args.checkpoint)
+    
+    # if not load_path or not os.path.exists(load_path):
+    #     print(f"Could not load model from: {load_path}")
+    #     return
+
+    # print(f"Loading model from: {load_path}")
+    # state_dict = torch.load(load_path, map_location=env.device)
+    
+    # # Handle different checkpoint formats
+    # if "policy_state_dict" in state_dict:
+    #     policy.load_state_dict(state_dict["policy_state_dict"], strict=False)
+    # elif "model_state_dict" in state_dict:
+    #     policy.load_state_dict(state_dict["model_state_dict"], strict=False)
+    # else:
+    #     policy.load_state_dict(state_dict, strict=False)
+
+    # # FIX: set eval AFTER loading weights and reset / detach hidden states
+    # policy.eval()
+    # if hasattr(policy, "detach_hidden_states"):
+    #     try:
+    #         policy.detach_hidden_states()
+    #     except Exception:
+    #         pass
+    # if hasattr(policy, "reset"):
+    #     try:
+    #         # reset all envs (no dones)
+    #         policy.reset(torch.zeros(env.num_envs, dtype=torch.bool, device=env.device))
+    #     except Exception:
+    #         try:
+    #             policy.reset()
+    #         except Exception:
+    #             pass
+
+    # obs = env.get_observations()
+    # if hasattr(policy, "update_normalization"):
+    #     try:
+    #         # convert to obs_groups expected by policy (training used teacher set)
+    #         obs_groups = tensor_to_obs_groups(obs, distill_cfg["obs_groups"])
+    #         # ensure device
+    #         if hasattr(obs_groups, "to"):
+    #             obs_groups = obs_groups.to(env.device)
+    #         policy.update_normalization(obs_groups)
+    #     except Exception:
+    #         pass
+
+    # # 5. Play Loop
+    # print("Starting play loop...")
+    # obs = env.get_observations()
+    
+    # # Reset environment to get initial state
+    # # env.reset() # make_env usually resets
+    # actions = torch.zeros(env.num_envs, 19, device=env.device, requires_grad=False)
+    
+    
+    # for i in range(10*int(env.max_episode_length)):
+    #     # Convert raw obs to obs_groups for the policy
+    #     if hasattr(obs, "to"):
+    #         obs = obs.to(env.device)
+    #     obs_groups = tensor_to_obs_groups(obs, distill_cfg["obs_groups"])
+        
+    #     with torch.no_grad():
+    #         # Use act_inference to get student actions
+    #         actions = policy.act_inference(obs_groups)
+        
+    #     # Debug: print action stats occasionally
+    #     if i < 200 and (i % 50 == 0):
+    #         try:
+    #             print(f"[debug] step {i} actions mean {actions.mean().item():.4f} std {actions.std().item():.4f}")
+    #         except Exception:
+    #             pass
+        
+    #     obs, _, rews, dones, infos = env.step(actions)
+        
+
 
 if __name__ == "__main__":
     args = get_args()

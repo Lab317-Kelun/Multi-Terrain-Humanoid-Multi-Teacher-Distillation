@@ -229,7 +229,7 @@ class DistillationRunner(OnPolicyRunner):
         lenbuffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, 1, dtype=torch.float, device=self.device)
-
+        
         # Ensure all parameters are in-synced
         if self.is_distributed:
             print(f"Synchronizing parameters for rank {self.gpu_global_rank}...")
