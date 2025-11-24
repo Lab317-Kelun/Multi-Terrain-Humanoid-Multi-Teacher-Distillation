@@ -41,6 +41,7 @@ from isaacgym import gymtorch, gymapi, gymutil
 import torch, torchvision
 from torch import Tensor
 from typing import Tuple, Dict
+import torch.nn.functional as F
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.envs.base.base_task import BaseTask
@@ -509,6 +510,11 @@ class HumanoidRobot(BaseTask):
             adds each terms to the episode sums and to the total reward
         """
         self.rew_buf[:] = 0.
+        
+        if 'terrain_onehot_latent' in self.extras:
+            self.terrain_onehot_latent = self.extras['terrain_onehot_latent']
+        if 'hist_terrain_onehot_latent' in self.extras:
+            self.hist_terrain_onehot_latent = self.extras['hist_terrain_onehot_latent']
         
         # 检查是否使用双critic
         use_double_critic = self.cfg.env.use_double_critic
@@ -1208,6 +1214,9 @@ class HumanoidRobot(BaseTask):
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.terrain_onehot = torch.zeros(self.num_envs, self.cfg.env.n_terrain_onehot, device=self.device, dtype=torch.float, requires_grad=False)
+        
+        self.terrain_onehot_latent = None
+        self.hist_terrain_onehot_latent = None
         
         # 初始化步态相位相关变量
         self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -2231,6 +2240,17 @@ class HumanoidRobot(BaseTask):
     def _reward_termination(self):
         # Terminal reward / penalty
         return self.reset_buf * ~self.time_out_buf
+    
+    def _reward_terrain_onehot_similarity(self):
+        if (self.terrain_onehot_latent is None or self.hist_terrain_onehot_latent is None):
+            return torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+        # 计算cosine相似度 cosine_similarity = (A · B) / (||A|| * ||B||)
+        cosine_sim = F.cosine_similarity(
+            self.terrain_onehot_latent, 
+            self.hist_terrain_onehot_latent, 
+            dim=1
+        )
+        return cosine_sim
     
     def _reward_foothold(self):
         """

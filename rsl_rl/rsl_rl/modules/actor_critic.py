@@ -98,12 +98,12 @@ class TerrainOnehotHistoryEncoder(nn.Module):
         self.encoder = nn.Sequential(
                 nn.Linear(input_size, 3 * channel_size), self.activation_fn,
                 )
-
         if tsteps == 50:
             self.conv_layers = nn.Sequential(
-                    nn.Conv1d(in_channels = 3 * channel_size, out_channels = 2 * channel_size, kernel_size = 8, stride = 4), self.activation_fn,
-                    nn.Conv1d(in_channels = 2 * channel_size, out_channels = channel_size, kernel_size = 5, stride = 1), self.activation_fn,
-                    nn.Conv1d(in_channels = channel_size, out_channels = channel_size, kernel_size = 5, stride = 1), self.activation_fn, nn.Flatten())
+                nn.Conv1d(in_channels = 3 * channel_size, out_channels = 2 * channel_size, kernel_size = 8, stride = 4), self.activation_fn,
+                nn.Conv1d(in_channels = 2 * channel_size, out_channels = channel_size, kernel_size = 5, stride = 1), self.activation_fn,
+                nn.Conv1d(in_channels = channel_size, out_channels = channel_size, kernel_size = 5, stride = 1), self.activation_fn, 
+                nn.Flatten())
         elif tsteps == 10:
             self.conv_layers = nn.Sequential(
                 nn.Conv1d(in_channels = 3 * channel_size, out_channels = 2 * channel_size, kernel_size = 4, stride = 2), self.activation_fn,
@@ -118,8 +118,7 @@ class TerrainOnehotHistoryEncoder(nn.Module):
             raise(ValueError("tsteps must be 10, 20 or 50"))
 
         self.linear_output = nn.Sequential(
-                nn.Linear(channel_size * 3, output_size), self.activation_fn
-                )
+                nn.Linear(channel_size * 3, output_size), self.activation_fn)
 
     def forward(self, obs):
         # nd * T * n_proprio
@@ -232,7 +231,6 @@ class Actor(nn.Module):
         self.history_encoder = StateHistoryEncoder(activation, num_prop, num_hist, priv_encoder_output_dim)
         self.terrain_onehot_history_encoder = TerrainOnehotHistoryEncoder(activation, num_prop, num_hist, terrain_onehot_encoder_output_dim)
    
-
         if self.if_scan_encode:
             if self.scan_encoder_type == 'cnn':
                 if scan_cnn_channels is None or len(scan_cnn_channels) == 0:

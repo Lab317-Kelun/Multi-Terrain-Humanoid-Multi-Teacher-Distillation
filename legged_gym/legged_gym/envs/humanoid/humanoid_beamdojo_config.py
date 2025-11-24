@@ -259,6 +259,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
+            
+            terrain_onehot_similarity = 1.0
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025

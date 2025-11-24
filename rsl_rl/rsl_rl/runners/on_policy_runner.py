@@ -191,7 +191,7 @@ class OnPolicyRunner:
         # 如果是AMP，添加disc_obs_shape
         if policy_class_name == "ActorCriticRMADoubleRewardAMP":
             storage_kwargs['disc_obs_shape'] = [self.env.disc_obs_size]
-            print(f"[AMP] Storage将包含disc_obs，形状: {[self.env.disc_obs_size]}")
+            print(f"[AMP] Storage将包含disc_obs, 形状: {[self.env.disc_obs_size]}")
             
         self.alg.init_storage(**storage_kwargs)
 
@@ -250,7 +250,14 @@ class OnPolicyRunner:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic_obs, infos, hist_encoding)
-                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
+                    
+                    with torch.no_grad():
+                        terrain_onehot_latent = self.alg.actor_critic.actor.infer_terrain_onehot(obs)
+                        hist_terrain_onehot_latent = self.alg.actor_critic.actor.infer_hist_terrain_onehot(obs)
+                    self.env.extras['terrain_onehot_latent'] = terrain_onehot_latent.detach()
+                    self.env.extras['hist_terrain_onehot_latent'] = hist_terrain_onehot_latent.detach()
+                    
+                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     infos = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in infos.items()}
                     rewards = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in rewards.items()}
