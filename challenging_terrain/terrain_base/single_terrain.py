@@ -246,7 +246,7 @@ class single_terrain:
                 start_y = 0,
                 platform_size=1.0, 
                 difficulty = 0.5,
-                height_range=[0.08,0.2],
+                height_range=[0.05,0.2],
                 size_range=[0.4,0.5],
                 upstair = True,
                 start_z = 3.0
