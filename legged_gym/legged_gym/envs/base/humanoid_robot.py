@@ -629,7 +629,7 @@ class HumanoidRobot(BaseTask):
         # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         # 获取步态相位观测
-        phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
+        # phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -664,8 +664,8 @@ class HumanoidRobot(BaseTask):
             self.motor_strength[1][:, :12] - 1
         ), dim=-1)
         
-        # 地形ID的onehot编码（硬编码：平地ID=3对应[1,0,0,0,0]）
-        self.terrain_onehot[:, 0] = 1.0  # 平地 -> [1,0,0,0,0]
+        # 地形ID的onehot编码
+        self.terrain_onehot[:, 0] = 0.0  # 平地 -> [0,0,0]
         # print(f"self.terrain_onehot: {self.terrain_onehot}")
         
         if self.cfg.terrain.measure_heights:
