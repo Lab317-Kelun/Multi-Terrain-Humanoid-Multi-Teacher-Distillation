@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
-import torch
+import torchact
 import torch.nn as nn
+import torch
 from tensordict import TensorDict
 from torch.distributions import Normal
 from typing import Any, NoReturn, Union , Dict, List
@@ -125,7 +126,7 @@ class MultiStudentTeacher(nn.Module):
         if student_obs_normalization:
             self.student_obs_normalizer = EmpiricalNormalization(num_student_obs)
         else:
-            self.student_obs_normalizer = torch.nn.Identity()
+            self.student_obs_normalizer = nn.Identity()
 
         # Teacher Actor
         if None in (teacher_num_prop, teacher_num_scan):
@@ -155,7 +156,7 @@ class MultiStudentTeacher(nn.Module):
         if teacher_obs_normalization:
             self.teacher_obs_normalizer = EmpiricalNormalization(num_teacher_obs)
         else:
-            self.teacher_obs_normalizer = torch.nn.Identity()
+            self.teacher_obs_normalizer = nn.Identity()
 
         # Action noise
         self.noise_std_type = noise_std_type
@@ -194,8 +195,13 @@ class MultiStudentTeacher(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def _update_distribution(self, obs: TensorDict) -> None:
-        # Compute mean using Actor with selected encoding path
-        mean = self.student(obs, hist_encoding=self.student_hist_encoding)
+        """
+        更新动作分布（用于采样动作）
+        
+        注意：这里使用的是self.student网络，因为这是学生模型的动作分布
+        """
+        # 计算动作均值（使用eval模式，与推理时一致）
+        mean = self.student(obs, hist_encoding=self.student_hist_encoding, eval=True)
         # Compute standard deviation
         if self.noise_std_type == "scalar":
             std = self.std.expand_as(mean)
@@ -213,10 +219,17 @@ class MultiStudentTeacher(nn.Module):
         return self.distribution.sample()
 
     def act_inference(self, obs: TensorDict) -> torch.Tensor:
+        """
+        学生模型推理（用于训练和推理，返回确定性动作）
+        
+        注意：确保与训练时的行为一致
+        - 使用eval模式（与_update_distribution一致）
+        - 返回确定性动作（网络输出均值，无噪声）
+        """
         obs = self.get_student_obs(obs)
-
         obs = self.student_obs_normalizer(obs)
-        return self.student(obs, hist_encoding=self.student_hist_encoding)
+        # 确保使用eval模式进行推理（与训练时的_update_distribution一致）
+        return self.student(obs, hist_encoding=self.student_hist_encoding, eval=True)
 
     def evaluate(self, obs: TensorDict) -> torch.Tensor:
         obs = self.get_teacher_obs(obs)
@@ -225,9 +238,9 @@ class MultiStudentTeacher(nn.Module):
             return self.teacher(obs, hist_encoding=self.teacher_hist_encoding)
 
     def get_student_obs(self, obs: TensorDict) -> torch.Tensor:
-        print("INFO:obs_groups in get_student_obs:", self.obs_groups["policy"])
+        # print("INFO:obs_groups in get_student_obs:", self.obs_groups["policy"])
         obs_list = [obs[obs_group] for obs_group in self.obs_groups["policy"]]
-        print("INFO:obs_list lengths:", [o.shape for o in obs_list])
+        # print("INFO:obs_list lengths:", [o.shape for o in obs_list])
         return torch.cat(obs_list, dim=-1)
 
     def get_teacher_obs(self, obs: TensorDict) -> torch.Tensor:
@@ -264,7 +277,30 @@ class MultiStudentTeacher(nn.Module):
                 :class:`OnPolicyRunner` to determine how to load further parameters.
         """
         # Check if state_dict contains teacher and student or just teacher parameters
-        if any("actor" in key for key in state_dict):  # Load parameters from RL training checkpoints
+        # 注意：必须先检查"student"键，因为student.actor_backbone.xxx也包含"actor"字符串
+        # 如果先检查"actor"，会误判蒸馏checkpoint为PPO checkpoint
+        if any("student" in key for key in state_dict):  
+            print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            # 情况1：从蒸馏训练的checkpoint加载（包含"student."和"teacher."前缀的键）
+            # 同时加载学生网络和教师网络！
+            # super().load_state_dict() 会加载整个MultiStudentTeacher模块，包括：
+            #   - student网络（student.xxx）
+            #   - teacher网络（teacher.xxx）
+            #   - student_obs_normalizer（如果有）
+            #   - teacher_obs_normalizer（如果有）
+            #   - std（动作噪声参数）
+            # 这样加载后，学生和教师网络都被加载到不同的网络结构中，
+            # 后续可以通过 policy.act_inference() 使用学生网络，
+            # 或者通过 policy.evaluate() 使用教师网络
+            super().load_state_dict(state_dict, strict=strict)
+            # Set flag for successfully loading the parameters
+            self.loaded_teacher = True
+            self.teacher.eval()
+            self.teacher_obs_normalizer.eval()
+            return True  # Training resumes
+        elif any("actor." in key for key in state_dict):  
+            # 情况2：从PPO训练的checkpoint加载（包含"actor."前缀的键，注意是"actor."不是"actor"）
+            # 只加载教师网络，因为PPO checkpoint中只有actor网络（作为教师使用）
             # Rename keys to match teacher and remove critic parameters
             teacher_state_dict = {}
             teacher_obs_normalizer_state_dict = {}
@@ -284,12 +320,5 @@ class MultiStudentTeacher(nn.Module):
             self.teacher.eval()
             self.teacher_obs_normalizer.eval()
             return False  # Training does not resume
-        elif any("student" in key for key in state_dict):  # Load parameters from distillation training
-            super().load_state_dict(state_dict, strict=strict)
-            # Set flag for successfully loading the parameters
-            self.loaded_teacher = True
-            self.teacher.eval()
-            self.teacher_obs_normalizer.eval()
-            return True  # Training resumes
         else:
             raise ValueError("state_dict does not contain student or teacher parameters")

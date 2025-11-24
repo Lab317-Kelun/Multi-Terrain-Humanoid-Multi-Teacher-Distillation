@@ -206,7 +206,7 @@ def play(args):
         with torch.no_grad():
             # Use act_inference to get student actions
             #print("INFO:", obs_groups)
-            actions = policy.act_inference(obs_groups)
+            actions = policy.evaluate(obs_groups)
             #print(f"Step {i}: Actions: {actions}")
         
         obs, _, rews, dones, infos = env.step(actions)

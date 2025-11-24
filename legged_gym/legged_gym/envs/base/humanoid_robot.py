@@ -214,8 +214,8 @@ class HumanoidRobot(BaseTask):
                     print("complete_rate=",(self.complete_times / self.total_times).cpu().numpy().copy())
                     self.last_times = self.total_times
                     
-        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
-        if use_double_critic and hasattr(self, 'dense_rew_buf') and hasattr(self, 'sparse_rew_buf'):
+
+        if self.cfg.env.use_double_critic:
             rewards = {
                 'dense': self.dense_rew_buf,
                 'sparse': self.sparse_rew_buf
@@ -383,15 +383,15 @@ class HumanoidRobot(BaseTask):
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        length = (self.cfg.terrain.terrain_length / 2) - 1.2
-        width = (self.cfg.terrain.terrain_width - 1) / 2 - 1.2
+        # length = (self.cfg.terrain.terrain_length / 2) - 0.2
+        # width = (self.cfg.terrain.terrain_width - 1) / 2 - 0.2
         # length = self.cfg.terrain.terrain_length- 0.2
         # width = self.cfg.terrain.terrain_width - 0.2
-        relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
-        x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
-        y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
+        # relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
+        # x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
+        # y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
         
-        boundary_cutoff = x_out_of_bounds | y_out_of_bounds
+        # boundary_cutoff = x_out_of_bounds | y_out_of_bounds
 
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
 
@@ -400,7 +400,7 @@ class HumanoidRobot(BaseTask):
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
         self.reset_buf |= height_cutoff
-        self.reset_buf |= boundary_cutoff  # 超出地形边界也终止
+        # self.reset_buf |= boundary_cutoff  # 超出地形边界也终止
 
         self.total_times += len(self.reset_buf.nonzero(as_tuple=False).flatten())
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
@@ -494,7 +494,7 @@ class HumanoidRobot(BaseTask):
         for key in self.episode_sums.keys():
             self.extras["episode"]['rew_' + key] = torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
             self.episode_sums[key][env_ids] = 0.
-        
+        self.episode_length_buf[env_ids] = 0
 
         # log additional curriculum info
         if self.cfg.terrain.curriculum:
@@ -504,14 +504,6 @@ class HumanoidRobot(BaseTask):
         # send timeout info to the algorithm
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
-
-        self.extras["episode"]["max_episode_length_s"] = self.max_episode_length_s
-        
-        episode_time = torch.mean((self.episode_length_buf[env_ids]).float()) * self.dt  
-        print("Episode time:", self.episode_length_buf[env_ids].float())
-        self.extras["episode"]["success_rate"] = episode_time / self.max_episode_length_s
-
-        self.episode_length_buf[env_ids] = 0
         
     def compute_reward(self):
         """ Compute rewards
@@ -520,10 +512,7 @@ class HumanoidRobot(BaseTask):
         """
         self.rew_buf[:] = 0.
         
-        # 检查是否使用双critic
-        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
-        
-        if use_double_critic:
+        if self.cfg.env.use_double_critic:
             # 初始化密集和稀疏奖励缓冲区
             if not hasattr(self, 'dense_rew_buf'):
                 self.dense_rew_buf = torch.zeros_like(self.rew_buf)
@@ -567,7 +556,7 @@ class HumanoidRobot(BaseTask):
             if self.cfg.rewards.only_positive_rewards:
                 self.rew_buf[:] = torch.clip(self.rew_buf[:], min=0.)
                 self.dense_rew_buf[:] = torch.clip(self.dense_rew_buf[:], min=0.)
-                self.sparse_rew_buf[:] = torch.clip(self.sparse_rew_buf[:], min=0.)
+                # self.sparse_rew_buf[:] = torch.clip(self.sparse_rew_buf[:], min=0.)
         else:
             # 原有的单一奖励逻辑
             for i in range(len(self.reward_functions)):
@@ -637,6 +626,7 @@ class HumanoidRobot(BaseTask):
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
         # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -812,20 +802,17 @@ class HumanoidRobot(BaseTask):
         
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
-
+        
         if self.cfg.commands.heading_command:
-            forward = quat_apply(self.base_quat, self.forward_vec)
-            heading = torch.atan2(forward[:, 1], forward[:, 0])
-            heading_error = wrap_to_pi(self.commands[:, 3] - heading)
-            # 使用PD控制器计算角速度命令，避免死区导致的跳跃
-            ang_vel_cmd = 0.8 * heading_error
-            # 应用死区：小于阈值的命令设为0，但保持连续性
+            self.commands[:, 3] = self.target_yaw
+            yaw_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+            ang_vel_cmd = 0.8 * yaw_error
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
                                             torch.zeros_like(ang_vel_cmd), 
                                             ang_vel_cmd)
 
-        if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+        if self.cfg.domain_rand.push_robots and (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
     
     def _gather_cur_goals(self, future=0):
@@ -920,23 +907,17 @@ class HumanoidRobot(BaseTask):
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
             
-        if self.cfg.commands.heading_command:
-            self.commands[env_ids, 3] = torch_rand_float(
-                self.command_ranges["heading"][0], 
-                self.command_ranges["heading"][1], 
-                (len(env_ids), 1), device=self.device
-            ).squeeze(1)
-        else:
+        if not self.cfg.commands.heading_command:
             self.commands[env_ids, 2] = torch_rand_float(
                 self.command_ranges["ang_vel_yaw"][0],
                 self.command_ranges["ang_vel_yaw"][1],
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
 
-        small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
-        self.commands[env_ids, 2] = torch.where(small_command_mask, 
-                                                torch.zeros_like(self.commands[env_ids, 2]), 
-                                                self.commands[env_ids, 2])
+            small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
+            self.commands[env_ids, 2] = torch.where(small_command_mask, 
+                                                    torch.zeros_like(self.commands[env_ids, 2]), 
+                                                    self.commands[env_ids, 2])
 
         small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
@@ -946,7 +927,6 @@ class HumanoidRobot(BaseTask):
         self.commands[env_ids, 1] = torch.where(small_lin_vel_y_mask, 
                                                torch.zeros_like(self.commands[env_ids, 1]), 
                                                self.commands[env_ids, 1])
-        
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -1440,7 +1420,6 @@ class HumanoidRobot(BaseTask):
             
             self.mass_params_tensor[i, :] = torch.from_numpy(mass_params).to(self.device).to(torch.float)
 
-        
         if self.cfg.domain_rand.randomize_friction:
             self.friction_coeffs_tensor = self.friction_coeffs.to(self.device).to(torch.float).squeeze(-1)
             
@@ -1649,9 +1628,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 10
+            y_start = - num_y / 2 * spacing
             x_end = -x_start + 0.08
-            y_end = -y_start + 20
+            y_end = -y_start 
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
             y_samples = torch.linspace(y_start, y_end, num_y, device=self.device)
@@ -2216,9 +2195,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing + 10
+            y_start = - num_y / 2 * spacing 
             x_end = -x_start + 0.08
-            y_end = -y_start + 20
+            y_end = -y_start 
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
