@@ -217,7 +217,7 @@ class Distillation:
         # 创建rollout存储
         self.storage = DistillationStorage(num_envs, num_transitions_per_env, self.device)
 
-    def act(self, obs: TensorDict) -> torch.Tensor:
+    def act(self, obs: TensorDict, terrain_ids: Union[torch.Tensor, None] = None) -> torch.Tensor:
         """
         根据观察生成动作（用于环境交互）
         
@@ -228,14 +228,16 @@ class Distillation:
         
         参数：
             obs: 观察数据（TensorDict格式，包含学生和教师的观察组）
+            terrain_ids: 地形ID（用于选择对应的教师）
             
         返回：
             学生模型生成的动作（用于环境交互）
         """
         # 计算学生模型动作（用于环境交互，需要detach避免梯度传播）
-        self.transition.actions = self.policy.act(obs).detach()
+        # 使用act_inference获取确定性动作（无噪声），避免训练时的抖动
+        self.transition.actions = self.policy.act_inference(obs).detach()
         # 计算教师模型动作（基于特权信息，作为训练目标，需要detach）
-        self.transition.privileged_actions = self.policy.evaluate(obs).detach()
+        self.transition.privileged_actions = self.policy.evaluate(obs, terrain_ids).detach()
         # 记录观察数据（用于后续训练）
         self.transition.observations = obs.clone()
         return self.transition.actions

@@ -5,12 +5,21 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
+from typing import Dict
 
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.envs.humanoid.humanoid_beamdojo_config import HumanoidBEAMDOJOCfgPPO
 from legged_gym.utils import get_args, task_registry
 from rsl_rl.runners.distillation_runner import DistillationRunner
 import torch
+
+# Configuration for Multi-Teacher Distillation
+# Map terrain_id (int) to checkpoint path (str)
+# Please update these paths with actual checkpoints corresponding to each terrain type
+TEACHER_CHECKPOINTS = {
+    # 0: "path/to/teacher_terrain_0.pt",
+    # 1: "path/to/teacher_terrain_1.pt",
+}
 
 def build_distillation_cfg(env_cfg) -> Dict:
     """Assemble the runner/algorithm configuration for distillation."""
@@ -70,6 +79,8 @@ def build_distillation_cfg(env_cfg) -> Dict:
         # Noise configuration
         "init_noise_std": 0.1,
         "noise_std_type": "scalar",
+        "num_teachers": max(len(TEACHER_CHECKPOINTS), 1),
+        "teacher_terrain_ids": sorted(TEACHER_CHECKPOINTS.keys()) if TEACHER_CHECKPOINTS else None,
     }
 
     algorithm_cfg = {
@@ -106,12 +117,35 @@ def prepare_log_dir(args) -> str:
 
 
 def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str) -> None:
-    if not checkpoint:
-        raise ValueError("Please provide --teacher_checkpoint pointing to a trained PPO model.")
-    state = torch.load(checkpoint, map_location=device)
-    # PPO checkpoints wrap the actor parameters inside 'model_state_dict'
-    teacher_state = state.get("model_state_dict", state)
-    runner.alg.policy.load_state_dict(teacher_state, strict=False)
+    if TEACHER_CHECKPOINTS:
+        print(f"Loading {len(TEACHER_CHECKPOINTS)} teachers from configuration...")
+        # Sort keys to ensure consistent order with 'teacher_terrain_ids' passed to policy
+        sorted_ids = sorted(TEACHER_CHECKPOINTS.keys())
+        
+        for i, t_id in enumerate(sorted_ids):
+            ckpt_path = TEACHER_CHECKPOINTS[t_id]
+            if not os.path.exists(ckpt_path):
+                print(f"Warning: Teacher checkpoint for terrain {t_id} not found at {ckpt_path}")
+                continue
+            
+            print(f"Loading teacher for terrain {t_id} (index {i}) from {ckpt_path}")
+            state = torch.load(ckpt_path, map_location=device)
+            # PPO checkpoints wrap the actor parameters inside 'model_state_dict'
+            teacher_state = state.get("model_state_dict", state)
+            
+            if i < len(runner.alg.policy.teachers):
+                runner.alg.policy.teachers[i].load_state_dict(teacher_state, strict=False)
+            else:
+                print(f"Error: Teacher index {i} out of range (num_teachers={len(runner.alg.policy.teachers)}).")
+    else:
+        if not checkpoint:
+            raise ValueError("Please provide --teacher_checkpoint pointing to a trained PPO model or configure TEACHER_CHECKPOINTS.")
+        print(f"Loading single teacher from {checkpoint} into all teacher slots...")
+        state = torch.load(checkpoint, map_location=device)
+        # PPO checkpoints wrap the actor parameters inside 'model_state_dict'
+        teacher_state = state.get("model_state_dict", state)
+        for teacher in runner.alg.policy.teachers:
+            teacher.load_state_dict(teacher_state, strict=False)
 
 
 def maybe_resume_student(runner: DistillationRunner, checkpoint: str | None, device: str) -> None:

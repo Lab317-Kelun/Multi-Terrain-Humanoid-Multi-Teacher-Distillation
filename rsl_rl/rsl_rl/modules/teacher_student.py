@@ -55,6 +55,8 @@ class MultiStudentTeacher(nn.Module):
         # Encoding behavior
         student_hist_encoding: bool = False,
         teacher_hist_encoding: bool = False,
+        num_teachers: int = 1,
+        teacher_terrain_ids: Union[List[int], None] = None,
         **kwargs: Dict[str, Any],
     ) -> None:
         if kwargs:
@@ -65,6 +67,8 @@ class MultiStudentTeacher(nn.Module):
         super().__init__()
 
         self.loaded_teacher = False  # Indicates if teacher has been loaded
+        self.num_teachers = num_teachers
+        self.teacher_terrain_ids = teacher_terrain_ids
 
         # Get the observation dimensions
         self.obs_groups = obs_groups
@@ -133,23 +137,28 @@ class MultiStudentTeacher(nn.Module):
             raise ValueError(
                 "teacher_num_prop and teacher_num_scan must be provided to use Actor architecture for teacher."
             )
-        self.teacher = Actor(
-            num_prop=teacher_num_prop,
-            num_scan=teacher_num_scan,
-            num_actions=num_actions,
-            scan_encoder_dims=list(scan_encoder_dims) if isinstance(scan_encoder_dims, tuple) else scan_encoder_dims,
-            actor_hidden_dims=list(teacher_actor_hidden_dims)
-            if isinstance(teacher_actor_hidden_dims, tuple)
-            else teacher_actor_hidden_dims,
-            priv_encoder_dims=list(priv_encoder_dims) if isinstance(priv_encoder_dims, tuple) else list(priv_encoder_dims),
-            num_priv_latent=teacher_num_priv_latent,
-            num_priv_explicit=teacher_num_priv_explicit,
-            num_hist=teacher_num_hist,
-            activation=activation_mod,
-            tanh_encoder_output=tanh_encoder_output,
-        )
-        self.teacher.eval()
-        print(f"Teacher Actor: {self.teacher}")
+        
+        self.teachers = nn.ModuleList()
+        for _ in range(self.num_teachers):
+            self.teachers.append(Actor(
+                num_prop=teacher_num_prop,
+                num_scan=teacher_num_scan,
+                num_actions=num_actions,
+                scan_encoder_dims=list(scan_encoder_dims) if isinstance(scan_encoder_dims, tuple) else scan_encoder_dims,
+                actor_hidden_dims=list(teacher_actor_hidden_dims)
+                if isinstance(teacher_actor_hidden_dims, tuple)
+                else teacher_actor_hidden_dims,
+                priv_encoder_dims=list(priv_encoder_dims) if isinstance(priv_encoder_dims, tuple) else list(priv_encoder_dims),
+                num_priv_latent=teacher_num_priv_latent,
+                num_priv_explicit=teacher_num_priv_explicit,
+                num_hist=teacher_num_hist,
+                activation=activation_mod,
+                tanh_encoder_output=tanh_encoder_output,
+            ))
+        
+        for teacher in self.teachers:
+            teacher.eval()
+        print(f"Teacher Actors ({self.num_teachers}): {self.teachers[0]}")
 
         # Teacher observation normalization
         self.teacher_obs_normalization = teacher_obs_normalization
@@ -231,11 +240,36 @@ class MultiStudentTeacher(nn.Module):
         # 确保使用eval模式进行推理（与训练时的_update_distribution一致）
         return self.student(obs, hist_encoding=self.student_hist_encoding, eval=True)
 
-    def evaluate(self, obs: TensorDict) -> torch.Tensor:
+    def evaluate(self, obs: TensorDict, terrain_ids: Union[torch.Tensor, None] = None) -> torch.Tensor:
         obs = self.get_teacher_obs(obs)
         obs = self.teacher_obs_normalizer(obs)
-        with torch.no_grad():
-            return self.teacher(obs, hist_encoding=self.teacher_hist_encoding)
+        
+        # If we have a single teacher and no specific terrain IDs assigned, treat it as a universal teacher
+        if self.num_teachers == 1 and self.teacher_terrain_ids is None:
+            with torch.no_grad():
+                return self.teachers[0](obs, hist_encoding=self.teacher_hist_encoding)
+        
+        if terrain_ids is None:
+            # Default to first teacher if no terrain_ids provided (e.g. during simple eval)
+            with torch.no_grad():
+                return self.teachers[0](obs, hist_encoding=self.teacher_hist_encoding)
+
+        actions = torch.zeros(obs.shape[0], self.teachers[0].num_actions, device=obs.device)
+        
+        # Determine which terrain ID maps to which teacher index
+        # If teacher_terrain_ids is provided, use it. Otherwise assume 0, 1, 2...
+        target_ids = self.teacher_terrain_ids if self.teacher_terrain_ids is not None else list(range(self.num_teachers))
+        
+        for i, teacher in enumerate(self.teachers):
+            # Get the terrain ID that this teacher (at index i) is responsible for
+            if i < len(target_ids):
+                t_id = target_ids[i]
+                # Select envs that match this teacher's terrain ID
+                mask = (terrain_ids == t_id)
+                if mask.any():
+                    with torch.no_grad():
+                        actions[mask] = teacher(obs[mask], hist_encoding=self.teacher_hist_encoding)
+        return actions
 
     def get_student_obs(self, obs: TensorDict) -> torch.Tensor:
         # print("INFO:obs_groups in get_student_obs:", self.obs_groups["policy"])
@@ -256,7 +290,8 @@ class MultiStudentTeacher(nn.Module):
     def train(self, mode: bool = True) -> None:
         super().train(mode)
         # Make sure teacher is in eval mode
-        self.teacher.eval()
+        for teacher in self.teachers:
+            teacher.eval()
         self.teacher_obs_normalizer.eval()
 
     def update_normalization(self, obs: TensorDict) -> None:
@@ -295,7 +330,8 @@ class MultiStudentTeacher(nn.Module):
             super().load_state_dict(state_dict, strict=strict)
             # Set flag for successfully loading the parameters
             self.loaded_teacher = True
-            self.teacher.eval()
+            for teacher in self.teachers:
+                teacher.eval()
             self.teacher_obs_normalizer.eval()
             return True  # Training resumes
         elif any("actor." in key for key in state_dict):  
@@ -309,15 +345,21 @@ class MultiStudentTeacher(nn.Module):
                     teacher_state_dict[key.replace("actor.", "")] = value
                 if "actor_obs_normalizer." in key:
                     teacher_obs_normalizer_state_dict[key.replace("actor_obs_normalizer.", "")] = value
+            
             # Load teacher actor
-            self.teacher.load_state_dict(teacher_state_dict, strict=strict)
+            # If loading a single PPO checkpoint, we load it into ALL teachers by default
+            # (This behavior might be overridden by explicit multi-teacher loading in the runner)
+            for teacher in self.teachers:
+                teacher.load_state_dict(teacher_state_dict, strict=strict)
+            
             # Load normalizer only if available in checkpoint
             if len(teacher_obs_normalizer_state_dict) > 0 and hasattr(self, "teacher_obs_normalizer"):
                 # Be lenient here to support checkpoints without normalizer
                 self.teacher_obs_normalizer.load_state_dict(teacher_obs_normalizer_state_dict, strict=False)
             # Set flag for successfully loading the parameters
             self.loaded_teacher = True
-            self.teacher.eval()
+            for teacher in self.teachers:
+                teacher.eval()
             self.teacher_obs_normalizer.eval()
             return False  # Training does not resume
         else:

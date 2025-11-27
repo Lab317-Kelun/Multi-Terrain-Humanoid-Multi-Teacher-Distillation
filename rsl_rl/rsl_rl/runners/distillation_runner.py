@@ -192,6 +192,12 @@ class DistillationRunner(OnPolicyRunner):
 
         # 开始学习：获取初始观察
         obs = tensor_to_obs_groups(self.env.get_observations(), self.cfg["obs_groups"]).to(self.device)
+        
+        # 获取初始地形ID
+        terrain_ids = None
+        if hasattr(self.env, "extras") and "terrain_ids" in self.env.extras:
+            terrain_ids = self.env.extras["terrain_ids"].to(self.device)
+            
         self.train_mode()  # 切换到训练模式（启用dropout等）
         
         # 记录统计信息
@@ -216,10 +222,14 @@ class DistillationRunner(OnPolicyRunner):
             with torch.inference_mode():  # 禁用梯度计算，加速数据收集
                 for _ in range(self.num_steps_per_env):
                     # 采样动作：学生模型生成动作，同时记录教师模型动作
-                    actions = self.alg.act(obs)
+                    actions = self.alg.act(obs, terrain_ids)
                     
                     # 在环境中执行动作
                     obs_tensor, _, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+                    
+                    # 更新地形ID
+                    if "terrain_ids" in extras:
+                        terrain_ids = extras["terrain_ids"].to(self.device)
                     
                     # 将观察转换为观察组格式并移动到设备
                     obs = tensor_to_obs_groups(obs_tensor, self.cfg["obs_groups"]).to(self.device)

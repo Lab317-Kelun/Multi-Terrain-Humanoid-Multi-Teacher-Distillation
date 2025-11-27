@@ -178,6 +178,10 @@ class HumanoidRobot(BaseTask):
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
         self.extras["delta_yaw_ok"] = self.delta_yaw < 0.6
+        if hasattr(self, "env_class"):
+            self.extras["terrain_ids"] = self.env_class.clone()
+        else:
+            self.extras["terrain_ids"] = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         if self.cfg.depth.use_camera and self.global_counter % self.cfg.depth.update_interval == 0:
             self.extras["depth"] = self.depth_buffer[:, -2]  # have already selected last one
         else:
