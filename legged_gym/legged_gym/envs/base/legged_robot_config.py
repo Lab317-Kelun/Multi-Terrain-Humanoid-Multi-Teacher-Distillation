@@ -56,6 +56,7 @@ class LeggedRobotCfg(BaseConfig):
 
         history_encoding = True
         reorder_dofs = True
+        use_double_critic = True
         
         
         # action_delay_range = [0, 5]
@@ -78,8 +79,8 @@ class LeggedRobotCfg(BaseConfig):
 
         contact_buf_len = 100
 
-        next_goal_threshold = 0.2
-        reach_goal_delay = 0.1
+        next_goal_threshold = 0.25
+        reach_goal_delay = 0.05
         num_future_goal_obs = 2
 
     class depth:

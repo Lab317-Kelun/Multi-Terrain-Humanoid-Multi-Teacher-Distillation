@@ -23,9 +23,8 @@ class combine_config:
                 single_terrain.flat_gap,   # 10: 组合地形（左边平地+右边间隙）
                 single_terrain.flat_Stones_Everywhere, #11
                 single_terrain.flat_Stones_Middle_Start, #12
-                # single_terrain.flat_Stepping_Stones,   #13
-                # single_terrain.flat_Balancing_Beams,   #14
-                # single_terrain.flat_Stepping_Beams,    #15
+                single_terrain.bridge_gap,   #13
+                single_terrain.stepping_stones,   #14
         ]
 
         multiplication = [
@@ -41,7 +40,7 @@ class combine_config:
         ]
 
         proportions = [
-                ("single", 3, 1)
+                ("single", 5, 1)
         ]
 
 class generator:

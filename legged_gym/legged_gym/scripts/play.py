@@ -57,15 +57,25 @@ def play(args):
         env_cfg.domain_rand.action_delay_view = 0
 
     env_cfg.env.num_envs = 1
-    env_cfg.env.episode_length_s = 4
+    env_cfg.env.episode_length_s = 20
     env_cfg.commands.resampling_time = 4
     env_cfg.rewards.is_play = True
+    
+    env_cfg.curriculum_config.success_mode = 'goal_reached'
+    env_cfg.curriculum_config.success_threshold = 1  # 连续存活成功次数阈值
+    env_cfg.curriculum_config.failure_threshold = 2   # 连续存活失败次数阈值
 
+    env_cfg.commands.ranges.lin_vel_x = [0.5, 0.6]
+    env_cfg.commands.ranges.lin_vel_y = [0.0, 0.0]
+    env_cfg.commands.ranges.ang_vel_yaw = [-0.0, 0.0]
+    env_cfg.commands.ranges.heading = [-0.0, 0.0]
+    env_cfg.commands.ranges.height = [-0.0, 0.0]
+    
     env_cfg.terrain.num_rows = 8
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.max_init_terrain_level = 0
 
-    env_cfg.terrain.height = [0.00, 0.04]
+    env_cfg.terrain.height = [0.00, 0.02]
     
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
