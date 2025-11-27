@@ -273,13 +273,112 @@ class HumanoidRobot(BaseTask):
 
         self.gym.end_access_image_tensors(self.sim)
 
-    def _update_goals(self):
-        next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
-        self.cur_goal_idx[next_flag] += 1
-        self.reach_goal_timer[next_flag] = 0
+    def _generate_forward_goal(self, env_ids):
+        """
+        在机器人前方扇形区域内生成随机目标点（新增功能）
+        
+        参数:
+            env_ids: 需要生成目标的环境ID列表
+            
+        返回:
+            goals: 生成的目标点 [len(env_ids), 3] (x, y, z)
+        """
+        # 获取配置参数，如果没有设置则使用默认值
+        min_distance = getattr(self.cfg.env, 'goal_min_distance', 2.0)  # 最小距离（米）
+        max_distance = getattr(self.cfg.env, 'goal_max_distance', 5.0)  # 最大距离（米）
+        angle_range = getattr(self.cfg.env, 'goal_angle_range', 60.0)  # 角度范围（度），前方±60度
+        
+        num_envs = len(env_ids)
+        
+        # 获取机器人当前位置和朝向
+        robot_pos = self.root_states[env_ids, :2]  # [num_envs, 2]
+        robot_yaw = self.yaw[env_ids]  # [num_envs]
+        
+        # 随机生成距离和角度
+        distances = torch_rand_float(min_distance, max_distance, (num_envs, 1), device=self.device).squeeze(1)
+        angle_range_rad = np.radians(angle_range)
+        angles = torch_rand_float(-angle_range_rad, angle_range_rad, (num_envs, 1), device=self.device).squeeze(1)
+        
+        # 相对于机器人朝向的角度（确保在前方）
+        target_angles = robot_yaw + angles
+        
+        # 计算目标位置（世界坐标系）
+        goal_x = robot_pos[:, 0] + distances * torch.cos(target_angles)
+        goal_y = robot_pos[:, 1] + distances * torch.sin(target_angles)
+        
+        # 检查目标是否在地形边界内，如果超出则调整
+        if hasattr(self, 'terrain') and self.terrain is not None:
+            length = self.cfg.terrain.terrain_length - 0.2
+            width = self.cfg.terrain.terrain_width - 0.2
+            env_origins_xy = self.env_origins[env_ids, :2]
+            
+            # 相对于环境原点的位置
+            relative_x = goal_x - env_origins_xy[:, 0]
+            relative_y = goal_y - env_origins_xy[:, 1]
+            
+            # 限制在边界内
+            relative_x = torch.clamp(relative_x, -length, length)
+            relative_y = torch.clamp(relative_y, -width, width)
+            
+            goal_x = env_origins_xy[:, 0] + relative_x
+            goal_y = env_origins_xy[:, 1] + relative_y
+        
+        # 获取目标点的高度（从地形采样）
+        if hasattr(self, 'height_samples') and self.height_samples is not None:
+            # 转换为网格索引
+            goal_points = torch.stack([goal_x, goal_y], dim=1)  # [num_envs, 2]
+            goal_points_grid = goal_points + self.terrain.cfg.border_size
+            goal_points_grid = (goal_points_grid / self.terrain.cfg.horizontal_scale).long()
+            
+            px = torch.clip(goal_points_grid[:, 0], 0, self.height_samples.shape[0]-2)
+            py = torch.clip(goal_points_grid[:, 1], 0, self.height_samples.shape[1]-2)
+            
+            # 采样高度
+            h1 = self.height_samples[px, py]
+            h2 = self.height_samples[px+1, py]
+            h3 = self.height_samples[px, py+1]
+            goal_z = torch.min(torch.min(h1, h2), h3) * self.terrain.cfg.vertical_scale
+        else:
+            # 如果没有地形，使用机器人当前高度
+            goal_z = self.root_states[env_ids, 2]
+        
+        goals = torch.stack([goal_x, goal_y, goal_z], dim=1)  # [num_envs, 3]
+        return goals
 
-        self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < self.cfg.env.next_goal_threshold
-        self.reach_goal_timer[self.reached_goal_ids] += 1
+    def _update_goals(self):
+        # 检查是否使用前方目标模式（新增功能）
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        
+        if use_forward_goals:
+            # 使用前方目标模式：检查是否到达目标，到达后生成新目标
+            self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < self.cfg.env.next_goal_threshold
+            self.reach_goal_timer[self.reached_goal_ids] += 1
+            
+            # 如果到达目标且满足延迟条件，生成新目标
+            next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
+            if next_flag.any():
+                env_ids_to_update = next_flag.nonzero(as_tuple=False).flatten()
+                # 增加目标计数（用于判断是否完成）
+                self.cur_goal_idx[env_ids_to_update] += 1
+                
+                # 生成新的当前目标
+                new_goals = self._generate_forward_goal(env_ids_to_update)
+                self.cur_goals[env_ids_to_update] = new_goals
+                
+                # 生成新的下一个目标（用于观测）
+                new_next_goals = self._generate_forward_goal(env_ids_to_update)
+                self.next_goals[env_ids_to_update] = new_next_goals
+                
+                # 重置计时器
+                self.reach_goal_timer[env_ids_to_update] = 0
+        else:
+            # 原有逻辑：使用预定义的目标列表
+            next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
+            self.cur_goal_idx[next_flag] += 1
+            self.reach_goal_timer[next_flag] = 0
+
+            self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < self.cfg.env.next_goal_threshold
+            self.reach_goal_timer[self.reached_goal_ids] += 1
 
         self.target_pos_rel = self.cur_goals[:, :2] - self.root_states[:, :2]
         self.next_target_pos_rel = self.next_goals[:, :2] - self.root_states[:, :2]
@@ -336,8 +435,11 @@ class HumanoidRobot(BaseTask):
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
 
-        self.cur_goals = self._gather_cur_goals()
-        self.next_goals = self._gather_cur_goals(future=1)
+        # 只有在使用原有目标模式时才更新（前方目标模式已在reset_idx中更新）
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        if not use_forward_goals:
+            self.cur_goals = self._gather_cur_goals()
+            self.next_goals = self._gather_cur_goals(future=1)
 
         self.update_depth_buffer()
 
@@ -379,7 +481,20 @@ class HumanoidRobot(BaseTask):
         self.reset_buf = torch.zeros((self.num_envs, ), dtype=torch.bool, device=self.device)
         roll_cutoff = torch.abs(self.roll) > 0.8
         pitch_cutoff = torch.abs(self.pitch) > 0.8
-        reach_goal_cutoff = self.cur_goal_idx >= self.cfg.terrain.num_goals
+        
+        # 检查是否使用前方目标模式
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        if use_forward_goals:
+            # 前方目标模式：使用配置中设置的目标数量
+            num_goals = getattr(self.cfg.env, 'num_goals', None)
+            if num_goals is None:
+                # 如果没有设置，使用地形配置中的目标数量作为默认值
+                num_goals = getattr(self.cfg.terrain, 'num_goals', 10)
+            reach_goal_cutoff = self.cur_goal_idx >= num_goals
+        else:
+            # 原有逻辑：使用预定义目标列表的终止条件
+            reach_goal_cutoff = self.cur_goal_idx >= self.cfg.terrain.num_goals
+        
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
@@ -402,7 +517,15 @@ class HumanoidRobot(BaseTask):
 
         self.total_times += len(self.reset_buf.nonzero(as_tuple=False).flatten())
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
-        self.complete_times += (self.cur_goal_idx[self.reset_buf.nonzero(as_tuple=False).flatten()] / self.cfg.terrain.num_goals).sum()
+        
+        # 计算完成度：根据使用的目标数量
+        if use_forward_goals:
+            num_goals = getattr(self.cfg.env, 'num_goals', None)
+            if num_goals is None:
+                num_goals = getattr(self.cfg.terrain, 'num_goals', 10)
+            self.complete_times += (self.cur_goal_idx[self.reset_buf.nonzero(as_tuple=False).flatten()] / num_goals).sum()
+        else:
+            self.complete_times += (self.cur_goal_idx[self.reset_buf.nonzero(as_tuple=False).flatten()] / self.cfg.terrain.num_goals).sum()
 
     def reset_idx(self, env_ids):
         """ Reset some environments.
@@ -482,6 +605,19 @@ class HumanoidRobot(BaseTask):
         self.action_history_buf[env_ids, :, :] = 0.
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
+        
+        # 检查是否使用前方目标模式（新增功能）
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        if use_forward_goals:
+            # 更新基础状态（需要先更新才能计算yaw）
+            self.base_quat[env_ids] = self.root_states[env_ids, 3:7]
+            self.roll[env_ids], self.pitch[env_ids], self.yaw[env_ids] = euler_from_quaternion(self.base_quat[env_ids])
+            
+            # 为重置的环境生成新的前方目标
+            new_cur_goals = self._generate_forward_goal(env_ids)
+            new_next_goals = self._generate_forward_goal(env_ids)
+            self.cur_goals[env_ids] = new_cur_goals
+            self.next_goals[env_ids] = new_next_goals
         
         # reset goal distance tracking for reach_goal reward
         distance_to_goal = torch.norm(self.root_states[env_ids, :2] - self.cur_goals[env_ids, :2], dim=1)
@@ -629,7 +765,7 @@ class HumanoidRobot(BaseTask):
         # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         # 获取步态相位观测
-        phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
+        # phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -810,13 +946,34 @@ class HumanoidRobot(BaseTask):
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
 
-        if self.cfg.commands.heading_command:
+        # 检查是否使用前方目标模式
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        
+        if use_forward_goals:
+            # 前方目标模式：每个步骤都根据目标点更新角速度
+            # 计算从机器人到目标的方向向量
+            target_pos_rel = self.cur_goals[:, :2] - self.root_states[:, :2]
+            # 计算目标朝向（世界坐标系）
+            target_yaw = torch.atan2(target_pos_rel[:, 1], target_pos_rel[:, 0])
+            
+            # 使用heading命令模式：更新heading命令为目标朝向
+            self.commands[:, 3] = target_yaw
+            # 然后计算角速度
             forward = quat_apply(self.base_quat, self.forward_vec)
             heading = torch.atan2(forward[:, 1], forward[:, 0])
-            heading_error = wrap_to_pi(self.commands[:, 3] - heading)
-            # 使用PD控制器计算角速度命令，避免死区导致的跳跃
+            heading_error = wrap_to_pi(target_yaw - heading)
             ang_vel_cmd = 0.8 * heading_error
-            # 应用死区：小于阈值的命令设为0，但保持连续性
+            small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
+            self.commands[:, 2] = torch.where(small_command_mask, 
+                                            torch.zeros_like(ang_vel_cmd), 
+                                            ang_vel_cmd)
+                
+        if self.cfg.commands.heading_command:
+            # 使用角速度命令模式：根据当前朝向和目标朝向计算角速度
+            current_yaw = self.yaw
+            heading_error = wrap_to_pi(target_yaw - current_yaw)
+            # 使用PD控制器计算角速度
+            ang_vel_cmd = 0.8 * heading_error
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
                                             torch.zeros_like(ang_vel_cmd), 
@@ -942,6 +1099,7 @@ class HumanoidRobot(BaseTask):
         return adaptive_speeds
     
     def _resample_commands(self, env_ids):
+        
         if self.cfg.commands.height_adaptive_speed:
             adaptive_speeds = self._generate_adaptive_speed(env_ids)
             self.commands[env_ids, 0] = adaptive_speeds
@@ -1088,7 +1246,17 @@ class HumanoidRobot(BaseTask):
             # 根据配置判断成功模式
             if curriculum_cfg.success_mode == 'goal_reached':
                 # 目标到达模式：判断是否到达所有目标点
-                is_success = self.cur_goal_idx[env_id] >= self.cfg.terrain.num_goals
+                # 检查是否使用前方目标模式
+                use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+                if use_forward_goals:
+                    # 前方目标模式：使用配置中设置的目标数量
+                    num_goals = getattr(self.cfg.env, 'num_goals', None)
+                    if num_goals is None:
+                        num_goals = getattr(self.cfg.terrain, 'num_goals', 10)
+                    is_success = self.cur_goal_idx[env_id] >= num_goals
+                else:
+                    # 原有逻辑：使用地形配置中的目标数量
+                    is_success = self.cur_goal_idx[env_id] >= self.cfg.terrain.num_goals
                 success_threshold = curriculum_cfg.success_threshold
                 failure_threshold = curriculum_cfg.failure_threshold
                 
@@ -1141,8 +1309,11 @@ class HumanoidRobot(BaseTask):
         temp = self.terrain_goals[self.terrain_levels, self.terrain_types]
         last_col = temp[:, -1].unsqueeze(1)
         self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
-        self.cur_goals = self._gather_cur_goals()
-        self.next_goals = self._gather_cur_goals(future=1)
+        # 只有在使用原有目标模式时才更新（前方目标模式会动态生成）
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        if not use_forward_goals:
+            self.cur_goals = self._gather_cur_goals()
+            self.next_goals = self._gather_cur_goals(future=1)
 
 
     def _init_buffers(self):
@@ -1646,39 +1817,70 @@ class HumanoidRobot(BaseTask):
             gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
 
     def _draw_goals(self):
-        sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(1, 0, 0))
-        sphere_geom_cur = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(0, 0, 1))
-        sphere_geom_reached = gymutil.WireframeSphereGeometry(self.cfg.env.next_goal_threshold, 32, 32, None, color=(0, 1, 0))
-        goals = self.terrain_goals[self.terrain_levels[self.lookat_id], self.terrain_types[self.lookat_id]].cpu().numpy()
-        for i, goal in enumerate(goals):
-            goal_xy = goal[:2] + self.terrain.cfg.border_size
-            pts = (goal_xy/self.terrain.cfg.horizontal_scale).astype(int)
-            goal_z = self.height_samples[pts[0], pts[1]].cpu().item() * self.terrain.cfg.vertical_scale
-            pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], goal_z), r=None)
-            if i == self.cur_goal_idx[self.lookat_id].cpu().item():
-                gymutil.draw_lines(sphere_geom_cur, self.gym, self.viewer, self.envs[self.lookat_id], pose)
-                if self.reached_goal_ids[self.lookat_id]:
-                    gymutil.draw_lines(sphere_geom_reached, self.gym, self.viewer, self.envs[self.lookat_id], pose)
-            else:
-                gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+        # 检查是否使用前方目标模式
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
         
-        if not self.cfg.depth.use_camera:
-            sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(1, 0.35, 0.25))
-            pose_robot = self.root_states[self.lookat_id, :3].cpu().numpy()
-            for i in range(5):
+        if use_forward_goals:
+            # 前方目标模式：只绘制当前目标（蓝色）
+            sphere_geom_cur = gymutil.WireframeSphereGeometry(0.15, 32, 32, None, color=(0, 0, 1))  # 蓝色：当前目标
+            sphere_geom_reached = gymutil.WireframeSphereGeometry(self.cfg.env.next_goal_threshold, 32, 32, None, color=(0, 1, 0))  # 绿色：到达范围
+            
+            # 绘制当前目标
+            cur_goal = self.cur_goals[self.lookat_id].cpu().numpy()
+            pose_cur = gymapi.Transform(gymapi.Vec3(cur_goal[0], cur_goal[1], cur_goal[2]), r=None)
+            gymutil.draw_lines(sphere_geom_cur, self.gym, self.viewer, self.envs[self.lookat_id], pose_cur)
+            
+            # 如果到达目标，绘制到达范围
+            if self.reached_goal_ids[self.lookat_id]:
+                gymutil.draw_lines(sphere_geom_reached, self.gym, self.viewer, self.envs[self.lookat_id], pose_cur)
+            
+            # 绘制从机器人到目标的箭头指示
+            if not self.cfg.depth.use_camera:
+                sphere_geom_arrow_cur = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(0, 0, 1))  # 蓝色箭头：当前目标方向
+                pose_robot = self.root_states[self.lookat_id, :3].cpu().numpy()
+                
+                # 绘制到当前目标的箭头
                 norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
                 target_vec_norm = self.target_pos_rel / (norm + 1e-5)
-                pose_arrow = pose_robot[:2] + 0.1*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
-                pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
-                gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+                for i in range(5):
+                    pose_arrow = pose_robot[:2] + 0.1*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
+                    pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
+                    gymutil.draw_lines(sphere_geom_arrow_cur, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+        else:
+            # 原有逻辑：绘制预定义目标列表
+            sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(1, 0, 0))
+            sphere_geom_cur = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(0, 0, 1))
+            sphere_geom_reached = gymutil.WireframeSphereGeometry(self.cfg.env.next_goal_threshold, 32, 32, None, color=(0, 1, 0))
+            goals = self.terrain_goals[self.terrain_levels[self.lookat_id], self.terrain_types[self.lookat_id]].cpu().numpy()
+            for i, goal in enumerate(goals):
+                goal_xy = goal[:2] + self.terrain.cfg.border_size
+                pts = (goal_xy/self.terrain.cfg.horizontal_scale).astype(int)
+                goal_z = self.height_samples[pts[0], pts[1]].cpu().item() * self.terrain.cfg.vertical_scale
+                pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], goal_z), r=None)
+                if i == self.cur_goal_idx[self.lookat_id].cpu().item():
+                    gymutil.draw_lines(sphere_geom_cur, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+                    if self.reached_goal_ids[self.lookat_id]:
+                        gymutil.draw_lines(sphere_geom_reached, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+                else:
+                    gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[self.lookat_id], pose)
             
-            sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(0, 1, 0.5))
-            for i in range(5):
-                norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
-                target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
-                pose_arrow = pose_robot[:2] + 0.2*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
-                pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
-                gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+            if not self.cfg.depth.use_camera:
+                sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(1, 0.35, 0.25))
+                pose_robot = self.root_states[self.lookat_id, :3].cpu().numpy()
+                for i in range(5):
+                    norm = torch.norm(self.target_pos_rel, dim=-1, keepdim=True)
+                    target_vec_norm = self.target_pos_rel / (norm + 1e-5)
+                    pose_arrow = pose_robot[:2] + 0.1*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
+                    pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
+                    gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+                
+                sphere_geom_arrow = gymutil.WireframeSphereGeometry(0.02, 16, 16, None, color=(0, 1, 0.5))
+                for i in range(5):
+                    norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
+                    target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
+                    pose_arrow = pose_robot[:2] + 0.2*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
+                    pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
+                    gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
         
     def _draw_feet(self):
         if not hasattr(self, '_foothold_offsets'):

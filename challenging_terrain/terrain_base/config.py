@@ -47,7 +47,7 @@ class terrain_config:
         measure_vertical_offset = 0.03     # 垂直偏移量 U(-0.03, 0.03) m，模拟雷达系统性高度误差
         measure_vertical_noise = 0.03       # 垂直噪声 U(-0.03, 0.03) m，模拟测量抖动
         measure_map_roll_pitch_noise = 0.03 # 地图倾斜噪声 U(-0.03, 0.03) m，模拟俯仰/滚转旋转误差
-        measure_map_yaw_noise = 0.2         # 地图偏航噪声 U(-0.2, 0.2) rad，模拟偏航旋转误差
+        measure_map_yaw_noise = 0.0         # 地图偏航噪声 U(-0.2, 0.2) rad，模拟偏航旋转误差
         # foothold_extension_prob = 0.6       # 支撑面扩展概率（暂时注释，需要重新理解和实现）
         map_repeat_prob = 0.2               # 地图更新延迟概率，模拟地图刷新滞后
         
