@@ -448,12 +448,13 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         checkpoint = -1
         resume_path = None
 
-        """ style rewards """
-        amp_reward_coef = 3 # scale of amp reward
-        num_amp_frames = 5
+        # AMP 相关统一配置（算法从此处读取）
+        amp_reward_mode = 'quadratic'     # 可选: 'quadratic' | 'gail' | 'tanh' | 'sigmoid'
+        amp_reward_coef = 3.0            # 判别器奖励系数（代替 amp_reward_weight）
+        num_amp_frames = 5               # AMP 判别器状态序列帧数
         amp_num_preload_transitions = 1000
-        use_lerp = False
-        amp_task_reward_lerp = 0.5
+        use_lerp = False                 # 是否使用判别器与任务奖励线性插值
+        amp_task_reward_lerp = 0.0       # 插值权重，0表示仅判别器奖励，1表示仅任务奖励
         amp_discr_hidden_dims = [1024, 512]
 
     class estimator(LeggedRobotCfgPPO.estimator):

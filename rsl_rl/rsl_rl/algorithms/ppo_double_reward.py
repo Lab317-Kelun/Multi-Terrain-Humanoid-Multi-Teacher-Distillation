@@ -81,6 +81,8 @@ class PPODoubleReward:
                  amp_loader_type='lafan_16dof_multi',
                  disc_learning_rate=2e-5,
                  amp_replay_buffer_size=100000,
+                 amp_reward_mode='quadratic',
+                 amp_reward_coef=0.0,
                  **kwargs):
 
         self.device = device
@@ -136,6 +138,11 @@ class PPODoubleReward:
         self.amp_normalizer = amp_normalizer
         self.num_amp_frames = num_amp_frames
         self.use_amp = use_amp
+        self.amp_reward_mode = amp_reward_mode
+        # 兼容旧参数名 amp_reward_weight（若存在则覆盖）
+        legacy_weight = kwargs.get('amp_reward_weight', None)
+        self.amp_reward_coef = legacy_weight if legacy_weight is not None else amp_reward_coef
+        self.last_amp_reward_mean = 0.0
         if self.use_amp:
             if self.discriminator is None:
                 print("[PPODoubleReward] use_amp=True 但未提供discriminator，自动禁用AMP")
@@ -147,7 +154,16 @@ class PPODoubleReward:
                 self.amp_storage = ReplayBufferMulti(
                     self.discriminator.state_dim, amp_replay_buffer_size, self.num_amp_frames, device=self.device)
                 self.amp_loader_type = amp_loader_type
+                # 判别器优化器（同时提供别名，Runner保存时更稳健）
                 self.optimizer_disc = optim.AdamW(self.discriminator.parameters(), lr=disc_learning_rate, weight_decay=1e-2)
+                self.disc_optimizer = self.optimizer_disc
+
+        # AMP 统计指标（用于 wandb 记录）
+        self.disc_policy_score_mean = 0.0
+        self.disc_policy_score_std = 0.0
+        self.disc_expert_score_mean = 0.0
+        self.disc_expert_score_std = 0.0
+        self.demo_acc_last = 0.0
         
         self.if_depth = depth_encoder != None
         if self.if_depth:
@@ -156,6 +172,10 @@ class PPODoubleReward:
             self.depth_encoder_paras = depth_encoder_paras
             self.depth_actor = depth_actor
             self.depth_actor_optimizer = optim.Adam([*self.depth_actor.parameters(), *self.depth_encoder.parameters()], lr=depth_encoder_paras["learning_rate"], eps=adam_epsilon)
+
+        # 读取与 AMP 插值相关的参数（从 kwargs 注入）
+        self.use_lerp = bool(kwargs.get('use_lerp', False))
+        self.amp_task_reward_lerp = float(kwargs.get('amp_task_reward_lerp', 0.0))
 
 
         print(f"PPODoubleReward initialized with use_double_critic={self.use_double_critic}")
@@ -209,10 +229,20 @@ class PPODoubleReward:
 
     def process_env_step(self, rewards, dones, infos, amp_obs_frames=None):
         """处理环境步骤，支持密集和稀疏奖励分离，并可选地接收 AMP 观测序列以训练判别器。"""
+        num_envs = self.transition.observations.shape[0]
         if isinstance(rewards, dict) and self.use_double_critic:
             # 如果奖励是字典格式，分离密集和稀疏奖励（不在此处混入判别器奖励）
-            rewards_dense = rewards.get('dense', torch.zeros_like(rewards.get('total', rewards.get('sparse', torch.zeros(1)))))
-            rewards_sparse = rewards.get('sparse', torch.zeros_like(rewards_dense))
+            rewards_dense = rewards.get('dense', None)
+            rewards_sparse = rewards.get('sparse', None)
+            # 标准化形状到 [N,1]
+            if isinstance(rewards_dense, torch.Tensor):
+                rewards_dense = rewards_dense.view(-1, 1)
+            else:
+                rewards_dense = torch.zeros((num_envs, 1), device=self.device)
+            if isinstance(rewards_sparse, torch.Tensor):
+                rewards_sparse = rewards_sparse.view(-1, 1)
+            else:
+                rewards_sparse = torch.zeros((num_envs, 1), device=self.device)
             rewards_total = rewards_dense + rewards_sparse
             
             self.transition.rewards_dense = rewards_dense.clone()
@@ -220,12 +250,59 @@ class PPODoubleReward:
 
         else:
             # 如果是单一奖励，作为密集奖励处理
-            rewards_total = rewards.clone()
+            rewards_total = rewards.clone().view(-1, 1)
             self.transition.rewards_dense = rewards_total.clone()
             if self.use_double_critic:
                 self.transition.rewards_sparse = torch.zeros_like(rewards_total)
 
-        self.transition.rewards = rewards_total.clone()
+        # ===== 模仿奖励并入密集奖励（若启用 AMP 且设置了系数）=====
+        if self.use_amp and self.amp_reward_coef != 0.0 and self.discriminator is not None:
+            # 1) 准备 AMP 观测序列：优先使用传入的 amp_obs_frames；否则从 obs 构造
+            if amp_obs_frames is None:
+                try:
+                    amp_obs_frames = self.build_amp_policy_frames(self.transition.observations)
+                except Exception as e:
+                    amp_obs_frames = None
+                    print(f"[AMP] Warning: failed to build amp policy frames: {e}")
+            # 2) 计算判别器输出与模仿奖励
+            if amp_obs_frames is not None:
+                with torch.no_grad():
+                    d_out = self.discriminator(amp_obs_frames.flatten(1))
+                    if self.amp_reward_mode == 'quadratic':
+                        # 与 AMPDiscriminatorMulti.predict_amp_reward 保持一致的判别器奖励形式
+                        disc_reward = self.amp_reward_coef * torch.clamp(1.0 - 0.25 * torch.square(d_out - 1.0), min=0.0)
+                    elif self.amp_reward_mode == 'gail':
+                        disc_reward = self.amp_reward_coef * (-torch.log(torch.clamp(1.0 - torch.sigmoid(d_out), min=1e-6)))
+                    elif self.amp_reward_mode == 'tanh':
+                        disc_reward = self.amp_reward_coef * torch.tanh(d_out)
+                    elif self.amp_reward_mode == 'sigmoid':
+                        disc_reward = self.amp_reward_coef * torch.sigmoid(d_out)
+                    else:
+                        disc_reward = self.amp_reward_coef * (-torch.log(torch.clamp(1.0 - torch.sigmoid(d_out), min=1e-6)))
+                # 标准化形状到 [N,1]
+                disc_reward = disc_reward.view(-1, 1)
+
+                # 3) 与密集奖励合并：支持 lerp 或直接相加（参考 AMPDiscriminatorMulti.predict_amp_reward）
+                if isinstance(rewards, dict) and self.use_double_critic:
+                    if getattr(self, 'use_lerp', False) and getattr(self, 'amp_task_reward_lerp', 0.0) > 0.0:
+                        lerp = float(getattr(self, 'amp_task_reward_lerp', 0.0))
+                        self.transition.rewards_dense = (1.0 - lerp) * disc_reward + lerp * self.transition.rewards_dense
+                    else:
+                        # 非 lerp 情况下，轻度缩放判别器奖励再相加（与 amp_discriminator_multi 的非 lerp 分支保持一致的风格）
+                        self.transition.rewards_dense = self.transition.rewards_dense + disc_reward * 0.02
+                    rewards_total = self.transition.rewards_dense + self.transition.rewards_sparse
+                else:
+                    if getattr(self, 'use_lerp', False) and getattr(self, 'amp_task_reward_lerp', 0.0) > 0.0:
+                        lerp = float(getattr(self, 'amp_task_reward_lerp', 0.0))
+                        self.transition.rewards_dense = (1.0 - lerp) * disc_reward + lerp * self.transition.rewards_dense
+                    else:
+                        self.transition.rewards_dense = self.transition.rewards_dense + disc_reward * 0.02
+                    rewards_total = self.transition.rewards_dense
+                # 记录最近一次 AMP 奖励均值（供 Runner 日志使用）
+                self.last_amp_reward_mean = float(disc_reward.mean().item())
+
+        # 确保奖励形状为 [num_envs, 1]，避免后续广播错误
+        self.transition.rewards = rewards_total.clone().view(-1, 1)
         self.transition.dones = dones
 
         # 写入 AMP 状态序列（若启用）
@@ -234,14 +311,24 @@ class PPODoubleReward:
         
         # Bootstrapping on time outs
         if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * torch.squeeze(self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device), 1)
+            # 保持形状一致为 [num_envs, 1]
+            time_outs_raw = infos['time_outs']
+            if isinstance(time_outs_raw, torch.Tensor):
+                # 先展平为 [N]，再扩展为 [N,1]
+                time_outs = time_outs_raw.view(-1,).unsqueeze(1).to(self.device)
+            else:
+                time_outs = torch.zeros((num_envs, 1), device=self.device)
+            # 统一 values 为 [N,1]
+            values_bootstrap = self.transition.values.view(num_envs, 1)
+            self.transition.rewards += self.gamma * (values_bootstrap * time_outs)
 
         # Record the transition
         self.storage.add_transitions(self.transition)
         self.transition.clear()
         self.actor_critic.reset(dones)
 
-        return rewards_total
+        # 返回给Runner的一维奖励向量，避免与其 [N] 累加时发生广播错误
+        return rewards_total.view(-1)
 
     def compute_returns(self, last_critic_obs):
         """计算returns和advantages, 支持双Critic"""
@@ -267,15 +354,25 @@ class PPODoubleReward:
         mean_discriminator_acc = 0
         # ===== 先训练判别器（若启用 AMP）=====
         if self.use_amp:
-            amp_policy_generator = self.amp_storage.feed_forward_generator(
-                self.num_learning_epochs * self.num_mini_batches,
-                self.storage.num_envs * self.storage.num_transitions_per_env // self.num_mini_batches)
-            if self.amp_loader_type in ('lafan_16dof_multi', 'lafan_16dof'):
-                amp_expert_generator = self.amp_data.feed_forward_generator_lafan_16dof_multi(
+            pol_score_mean_acc = 0.0
+            pol_score_std_acc = 0.0
+            exp_score_mean_acc = 0.0
+            exp_score_std_acc = 0.0
+            demo_acc_acc = 0.0
+            num_disc_updates = 0
+            if self.amp_storage is not None and self.amp_data is not None:
+                amp_policy_generator = self.amp_storage.feed_forward_generator(
                     self.num_learning_epochs * self.num_mini_batches,
                     self.storage.num_envs * self.storage.num_transitions_per_env // self.num_mini_batches)
+                if self.amp_loader_type in ('lafan_16dof_multi', 'lafan_16dof'):
+                    amp_expert_generator = self.amp_data.feed_forward_generator_lafan_16dof_multi(
+                        self.num_learning_epochs * self.num_mini_batches,
+                        self.storage.num_envs * self.storage.num_transitions_per_env // self.num_mini_batches)
+                else:
+                    raise NotImplementedError(f"Unsupported amp_loader_type: {self.amp_loader_type}")
             else:
-                raise NotImplementedError(f"Unsupported amp_loader_type: {self.amp_loader_type}")
+                amp_policy_generator = []
+                amp_expert_generator = []
             for sample_amp_policy, sample_amp_expert in zip(amp_policy_generator, amp_expert_generator):
                 expert_states = sample_amp_expert.to(self.device)
                 policy_states = sample_amp_policy
@@ -306,6 +403,22 @@ class PPODoubleReward:
                     self.amp_normalizer.update(expert_states.cpu().numpy())
                 mean_discriminator_loss += amp_loss.item()
                 mean_discriminator_acc += agent_acc.mean().item()
+
+                # 累计分数统计用于 wandb
+                pol_score_mean_acc += policy_d.mean().item()
+                pol_score_std_acc += policy_d.std().item()
+                exp_score_mean_acc += expert_d.mean().item()
+                exp_score_std_acc += expert_d.std().item()
+                demo_acc_acc += demo_acc.item()
+                num_disc_updates += 1
+
+            # 更新实例属性供 Runner 记录
+            if num_disc_updates > 0:
+                self.disc_policy_score_mean = pol_score_mean_acc / num_disc_updates
+                self.disc_policy_score_std = pol_score_std_acc / num_disc_updates
+                self.disc_expert_score_mean = exp_score_mean_acc / num_disc_updates
+                self.disc_expert_score_std = exp_score_std_acc / num_disc_updates
+                self.demo_acc_last = demo_acc_acc / num_disc_updates
         # 根据是否使用双Critic选择合适的generator
         if self.use_double_critic and hasattr(self.storage, 'mini_batch_generator_double'):
             generator = self.storage.mini_batch_generator_double(self.num_mini_batches, self.num_learning_epochs)
@@ -466,6 +579,45 @@ class PPODoubleReward:
             return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse
         else:
             return mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef
+
+    def build_amp_policy_frames(self, obs):
+        """根据当前观测构建 AMP 观测序列 [N, num_amp_frames, state_dim]。
+        默认使用 proprio 维度作为 state_dim；历史帧来自观测尾部的展平历史。
+        """
+        if not self.use_amp or self.discriminator is None:
+            return None
+        num_envs = obs.shape[0]
+        state_dim = self.discriminator.state_dim
+        # 当前 proprio
+        current_prop = obs[:, :self.num_prop]
+        # 历史观测（展平）重塑为 [N, num_hist, num_prop]
+        hist_flat = obs[:, -self.num_hist * self.num_prop:]
+        hist = hist_flat.view(num_envs, self.num_hist, self.num_prop)
+
+        # 组装最近的 num_amp_frames：使用 (num_amp_frames-1) 个历史帧 + 当前帧
+        frames_needed_hist = max(self.num_amp_frames - 1, 0)
+        if frames_needed_hist > 0:
+            take = min(frames_needed_hist, self.num_hist)
+            selected_hist = hist[:, -take:, :]
+        else:
+            selected_hist = current_prop.new_zeros((num_envs, 0, self.num_prop))
+
+        frames = torch.cat([selected_hist, current_prop.unsqueeze(1)], dim=1)
+        # 若不足 num_amp_frames，前面用零帧填充
+        if frames.shape[1] < self.num_amp_frames:
+            pad_len = self.num_amp_frames - frames.shape[1]
+            pad = current_prop.new_zeros((num_envs, pad_len, self.num_prop))
+            frames = torch.cat([pad, frames], dim=1)
+
+        # 若判别器的 state_dim 与 num_prop 不一致，做安全裁剪或零填充
+        if self.num_prop == state_dim:
+            return frames
+        elif self.num_prop > state_dim:
+            return frames[:, :, :state_dim]
+        else:
+            # num_prop < state_dim，后面零填充
+            pad_feat = current_prop.new_zeros((num_envs, self.num_amp_frames, state_dim - self.num_prop))
+            return torch.cat([frames, pad_feat], dim=-1)
 
     def update_counter(self):
         self.counter += 1
