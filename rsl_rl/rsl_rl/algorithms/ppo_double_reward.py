@@ -10,6 +10,7 @@ import numpy as np
 
 from rsl_rl.modules import ActorCriticRMADoubleReward
 from rsl_rl.storage import RolloutStorage
+from rsl_rl.storage.replay_buffer_multi import ReplayBufferMulti
 import wandb
 from rsl_rl.utils import unpad_trajectories
 
@@ -71,6 +72,15 @@ class PPODoubleReward:
                  dense_value_loss_coef=1.0,
                  sparse_value_loss_coef=1.0,
                  advantage_merge_weight=0.5,
+                 # ===== AMP 相关（可选） =====
+                 use_amp=False,
+                 discriminator=None,
+                 amp_data=None,
+                 amp_normalizer=None,
+                 num_amp_frames=None,
+                 amp_loader_type='lafan_16dof_multi',
+                 disc_learning_rate=2e-5,
+                 amp_replay_buffer_size=100000,
                  **kwargs):
 
         self.device = device
@@ -120,7 +130,25 @@ class PPODoubleReward:
         self.num_hist = estimator_paras["num_hist"]
         self.estimator_optimizer = optim.Adam(self.estimator.parameters(), lr=estimator_paras["learning_rate"], eps=adam_epsilon)
         self.train_with_estimated_states = estimator_paras["train_with_estimated_states"]
-
+        # ===== AMP =====
+        self.discriminator = discriminator
+        self.amp_data = amp_data
+        self.amp_normalizer = amp_normalizer
+        self.num_amp_frames = num_amp_frames
+        self.use_amp = use_amp
+        if self.use_amp:
+            if self.discriminator is None:
+                print("[PPODoubleReward] use_amp=True 但未提供discriminator，自动禁用AMP")
+                self.use_amp = False
+            else:
+                self.discriminator.to(self.device)
+                self.amp_transition = RolloutStorage.Transition()
+                # amp_storage 保存策略生成的 AMP 状态序列（policy）
+                self.amp_storage = ReplayBufferMulti(
+                    self.discriminator.state_dim, amp_replay_buffer_size, self.num_amp_frames, device=self.device)
+                self.amp_loader_type = amp_loader_type
+                self.optimizer_disc = optim.AdamW(self.discriminator.parameters(), lr=disc_learning_rate, weight_decay=1e-2)
+        
         self.if_depth = depth_encoder != None
         if self.if_depth:
             self.depth_encoder = depth_encoder
@@ -179,10 +207,10 @@ class PPODoubleReward:
         self.transition.critic_observations = critic_obs
         return self.transition.actions
 
-    def process_env_step(self, rewards, dones, infos):
-        """处理环境步骤，支持密集和稀疏奖励分离"""
+    def process_env_step(self, rewards, dones, infos, amp_obs_frames=None):
+        """处理环境步骤，支持密集和稀疏奖励分离，并可选地接收 AMP 观测序列以训练判别器。"""
         if isinstance(rewards, dict) and self.use_double_critic:
-            # 如果奖励是字典格式，分离密集和稀疏奖励
+            # 如果奖励是字典格式，分离密集和稀疏奖励（不在此处混入判别器奖励）
             rewards_dense = rewards.get('dense', torch.zeros_like(rewards.get('total', rewards.get('sparse', torch.zeros(1)))))
             rewards_sparse = rewards.get('sparse', torch.zeros_like(rewards_dense))
             rewards_total = rewards_dense + rewards_sparse
@@ -199,6 +227,10 @@ class PPODoubleReward:
 
         self.transition.rewards = rewards_total.clone()
         self.transition.dones = dones
+
+        # 写入 AMP 状态序列（若启用）
+        if self.use_amp and amp_obs_frames is not None:
+            self.amp_storage.insert(amp_obs_frames)
         
         # Bootstrapping on time outs
         if 'time_outs' in infos:
@@ -233,6 +265,47 @@ class PPODoubleReward:
         mean_priv_reg_loss = 0
         mean_discriminator_loss = 0
         mean_discriminator_acc = 0
+        # ===== 先训练判别器（若启用 AMP）=====
+        if self.use_amp:
+            amp_policy_generator = self.amp_storage.feed_forward_generator(
+                self.num_learning_epochs * self.num_mini_batches,
+                self.storage.num_envs * self.storage.num_transitions_per_env // self.num_mini_batches)
+            if self.amp_loader_type in ('lafan_16dof_multi', 'lafan_16dof'):
+                amp_expert_generator = self.amp_data.feed_forward_generator_lafan_16dof_multi(
+                    self.num_learning_epochs * self.num_mini_batches,
+                    self.storage.num_envs * self.storage.num_transitions_per_env // self.num_mini_batches)
+            else:
+                raise NotImplementedError(f"Unsupported amp_loader_type: {self.amp_loader_type}")
+            for sample_amp_policy, sample_amp_expert in zip(amp_policy_generator, amp_expert_generator):
+                expert_states = sample_amp_expert.to(self.device)
+                policy_states = sample_amp_policy
+                if self.amp_normalizer is not None:
+                    with torch.no_grad():
+                        expert_states = self.amp_normalizer.normalize_torch(expert_states, self.device)
+                        policy_states = self.amp_normalizer.normalize_torch(policy_states, self.device)
+                policy_d = self.discriminator(policy_states.flatten(1))
+                expert_d = self.discriminator(expert_states.flatten(1))
+                agent_acc = (policy_d < 0).float().mean()
+                demo_acc = (expert_d > 0).float().mean()
+                # MSE 目标与正则（与 amp_ppo_multi 保持一致）
+                expert_loss = torch.nn.MSELoss()(expert_d, torch.ones_like(expert_d, device=self.device))
+                policy_loss = torch.nn.MSELoss()(policy_d, -1 * torch.ones_like(policy_d, device=self.device))
+                amp_loss = 0.5 * (expert_loss + policy_loss)
+                grad_pen_loss = self.discriminator.compute_grad_pen(expert_states, lambda_=5)
+                logit_weights = self.discriminator.get_disc_logit_weights()
+                disc_logit_loss = 0.01 * torch.sum(torch.square(logit_weights))
+                disc_weights = torch.cat(self.discriminator.get_disc_weights(), dim=-1)
+                disc_weight_decay = 0.0001 * torch.sum(torch.square(disc_weights))
+                disc_loss = amp_loss + grad_pen_loss + disc_logit_loss + disc_weight_decay
+                self.optimizer_disc.zero_grad()
+                disc_loss.backward()
+                nn.utils.clip_grad_norm_(self.discriminator.parameters(), self.max_grad_norm)
+                self.optimizer_disc.step()
+                if self.amp_normalizer is not None:
+                    self.amp_normalizer.update(policy_states.cpu().numpy())
+                    self.amp_normalizer.update(expert_states.cpu().numpy())
+                mean_discriminator_loss += amp_loss.item()
+                mean_discriminator_acc += agent_acc.mean().item()
         # 根据是否使用双Critic选择合适的generator
         if self.use_double_critic and hasattr(self.storage, 'mini_batch_generator_double'):
             generator = self.storage.mini_batch_generator_double(self.num_mini_batches, self.num_learning_epochs)
@@ -379,8 +452,8 @@ class PPODoubleReward:
         mean_surrogate_loss /= num_updates
         mean_estimator_loss /= num_updates
         mean_priv_reg_loss /= num_updates
-        mean_discriminator_loss /= num_updates
-        mean_discriminator_acc /= num_updates
+        mean_discriminator_loss /= max(1, num_updates)  # 若 AMP 关闭，不影响
+        mean_discriminator_acc /= max(1, num_updates)
         
         if self.use_double_critic:
             mean_value_loss_dense /= num_updates

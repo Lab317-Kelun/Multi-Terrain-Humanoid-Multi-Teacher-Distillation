@@ -87,6 +87,18 @@ class HumanoidRobot(BaseTask):
         
         self.num_lower_dof = self.cfg.env.num_actions
         
+        # AMP 接口属性（不使用深度相机，仅基于下肢关节）
+        self.amp_motion_files = getattr(self.cfg.env, 'amp_motion_files', [])
+        self.num_amp_obs = getattr(self.cfg.env, 'num_amp_obs', 0)
+        self.reference_state_initialization = getattr(self.cfg.env, 'reference_state_initialization', False)
+        
+        # 选择用于 AMP 观测的关节索引：沿用下肢动作控制关节
+        if hasattr(self, 'leg_joint_indices') and hasattr(self, 'ankle_joint_indices'):
+            self._amp_dof_indices = torch.cat((self.leg_joint_indices, self.ankle_joint_indices))
+        else:
+            # 兜底：若索引未构建，使用前 num_actions 个关节
+            self._amp_dof_indices = torch.arange(self.cfg.env.num_actions, device=self.device, dtype=torch.long)
+        
         if not self.headless:
             self.set_camera(self.cfg.viewer.pos, self.cfg.viewer.lookat)
         self._init_buffers()
@@ -227,6 +239,14 @@ class HumanoidRobot(BaseTask):
 
     def get_history_observations(self):
         return self.obs_history_buf
+    
+    def get_amp_observations(self):
+        """返回判别器观测（AMP），仅使用下肢关节位置。
+        不引入深度相机信息，接口与参考AMP环境兼容。
+        """
+        if getattr(self, 'num_amp_obs', 0) == 0:
+            return None
+        return self.dof_pos[..., self._amp_dof_indices]
     
     def normalize_depth_image(self, depth_image):
         depth_image = depth_image * -1

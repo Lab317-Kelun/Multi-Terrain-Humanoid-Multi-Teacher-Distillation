@@ -45,6 +45,9 @@ from rsl_rl.algorithms import PPOMirror
 from rsl_rl.algorithms.ppo_double_reward import PPODoubleReward
 from rsl_rl.modules import *
 from rsl_rl.env import VecEnv
+from rsl_rl.algorithms.amp_discriminator_multi import AMPDiscriminatorMulti
+from legged_gym.datasets.motion_loader_g1 import G1_AMPLoader
+from rsl_rl.utils.normalizer import Normalizer
 import sys
 from copy import copy, deepcopy
 import warnings
@@ -69,7 +72,7 @@ class OnPolicyRunner:
         print("Using MLP and Priviliged Env encoder ActorCritic structure")
         
         # 动态选择policy类
-        policy_class_name = self.cfg.get("policy_class_name", "ActorCriticRMA")
+        policy_class_name = self.cfg.get("policy_class_name", "ActorCriticRMADoubleReward")
         if policy_class_name == "ActorCriticRMADoubleReward":
             from rsl_rl.modules.actor_critic import ActorCriticRMADoubleReward
             actor_critic_class = ActorCriticRMADoubleReward
@@ -138,16 +141,76 @@ class OnPolicyRunner:
         # Create algorithm
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
         
+        discriminator = None
+        amp_data = None
+        amp_normalizer = None
+        if self.alg_cfg.get("use_amp", False):
+            num_amp_obs = getattr(self.env.cfg.env, 'num_amp_obs', None)
+            num_amp_frames = self.cfg.get("num_amp_frames")
+            amp_reward_coef = self.cfg.get("amp_reward_coef")
+            amp_discr_hidden_dims = self.cfg.get("amp_discr_hidden_dims")
+            amp_task_reward_lerp = self.cfg.get("amp_task_reward_lerp")
+            use_lerp = self.cfg.get("use_lerp")
+            motion_dir = getattr(self.env.cfg.env, 'amp_motion_files', None)
+            amp_loader_type = self.alg_cfg.get("amp_loader_type")
+            amp_loader_class_name = self.alg_cfg.get("amp_loader_class_name", "G1_AMPLoader")
+            if num_amp_obs is not None and num_amp_frames is not None and motion_dir is not None and amp_loader_type is not None:
+                amp_data = eval(amp_loader_class_name)(
+                    self.device,
+                    time_between_frames=self.env.dt,
+                    motion_dir=motion_dir,
+                    preload_transitions=True,
+                    num_preload_transitions=self.cfg.get("amp_num_preload_transitions"),
+                    num_frames=num_amp_frames,
+                )
+                amp_normalizer = Normalizer(num_amp_obs, self.device)
+                discriminator = AMPDiscriminatorMulti(
+                    num_amp_obs,
+                    amp_reward_coef,
+                    amp_discr_hidden_dims,
+                    self.device,
+                    num_amp_frames,
+                    amp_task_reward_lerp,
+                    use_lerp,
+                )
+                # 与AMP多帧runner保持一致：避免无关键传入算法构造
+                if "amp_loader_class_name" in self.alg_cfg:
+                    del self.alg_cfg["amp_loader_class_name"]
+        
+        alg_cfg_filtered = dict(self.alg_cfg)
+        for k in ["amp_loader_class_name", "amp_loader_type", "use_amp"]:
+            if k in alg_cfg_filtered:
+                del alg_cfg_filtered[k]
+
         self.alg: PPO = alg_class(actor_critic, 
                                   estimator=estimator,
                                   estimator_paras=self.estimator_cfg,
                                   depth_encoder=depth_encoder,
                                   depth_encoder_paras=self.depth_encoder_cfg,
                                   depth_actor=depth_actor,
-                                  device=self.device, **self.alg_cfg)
+                                  discriminator=discriminator,
+                                  amp_data=amp_data,
+                                  amp_normalizer=amp_normalizer,
+                                  num_amp_frames=self.cfg.get("num_amp_frames"),
+                                  amp_loader_type=self.alg_cfg.get("amp_loader_type"),
+                                  use_amp=self.alg_cfg.get("use_amp", False),
+                                  device=self.device, **alg_cfg_filtered)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
         self.dagger_update_freq = self.alg_cfg["dagger_update_freq"]
+
+        # ===== AMP runner侧缓冲初始化 =====
+        # 依据参考实现，若环境提供AMP观测维度且算法配置包含num_amp_frames，则在runner中维护一个循环缓冲
+        self.use_amp = getattr(self.alg, 'use_amp', False)
+        self.num_amp_frames = getattr(self.alg, 'num_amp_frames', None)
+        self.num_amp_obs = getattr(self.env.cfg.env, 'num_amp_obs', None)
+        if self.use_amp and self.num_amp_frames is not None and self.num_amp_obs is not None:
+            # 形状: (num_envs, num_amp_frames, num_amp_obs)
+            self.amp_obs_buffer = torch.zeros(self.env.num_envs, self.num_amp_frames, self.num_amp_obs, device=self.device)
+            self.amp_frame_cursor = torch.zeros(self.env.num_envs, dtype=torch.long, device=self.device)
+        else:
+            self.amp_obs_buffer = None
+            self.amp_frame_cursor = None
 
         # 准备init_storage参数
         storage_kwargs = {
@@ -158,7 +221,28 @@ class OnPolicyRunner:
             'action_shape': [self.env.num_actions],
         }
             
-        self.alg.init_storage(**storage_kwargs)
+        # 针对不同算法的存储初始化：AMPPPOMulti 需要历史与深度参数
+        if type(self.alg).__name__ == 'AMPPPOMulti':
+            history_len = getattr(self.env.cfg.env, 'history_len', 0)
+            history_dim = getattr(self.env.cfg.env, 'n_proprio', self.env.num_obs)
+            depth_shape = None
+            depth_buffer_len = None
+            if hasattr(self.env.cfg, 'depth') and getattr(self.env.cfg.depth, 'use_camera', False):
+                depth_shape = (self.env.cfg.depth.resized[1], self.env.cfg.depth.resized[0])
+                depth_buffer_len = self.env.cfg.depth.buffer_len
+            self.alg.init_storage(
+                storage_kwargs['num_envs'],
+                storage_kwargs['num_transitions_per_env'],
+                storage_kwargs['actor_obs_shape'],
+                storage_kwargs['critic_obs_shape'],
+                storage_kwargs['action_shape'],
+                history_len=history_len,
+                history_dim=history_dim,
+                depth_shape=depth_shape,
+                depth_buffer_len=depth_buffer_len
+            )
+        else:
+            self.alg.init_storage(**storage_kwargs)
 
         self.learn = self.learn_RL if not self.if_depth else self.learn_vision
             
@@ -213,42 +297,95 @@ class OnPolicyRunner:
             # Rollout
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
-                    actions = self.alg.act(obs, critic_obs, infos, hist_encoding)
-                    obs, privileged_obs, rewards, dones, infos = self.env.step(actions)  # obs has changed to next_obs !! if done obs has been reset
+                    # 根据算法类型适配 act() 签名
+                    if type(self.alg).__name__ == 'AMPPPOMulti':
+                        history = self.env.get_history_observations().to(self.device) if hasattr(self.env, 'get_history_observations') else None
+                        depth_image = None
+                        if hasattr(self.env, 'cfg') and hasattr(self.env.cfg, 'depth') and getattr(self.env.cfg.depth, 'use_camera', False):
+                            depth_image = self.env.depth_buffer.clone().to(self.device)
+                        obs_input = (obs, depth_image) if depth_image is not None else obs
+                        actions = self.alg.act(obs_input, critic_obs, history)
+                    else:
+                        actions = self.alg.act(obs, critic_obs, infos, hist_encoding)
+                    # 兼容LeggedRobot.step的扩展返回值
+                    step_outputs = self.env.step(actions)
+                    if isinstance(step_outputs, tuple) and len(step_outputs) >= 5:
+                        obs, privileged_obs, rewards, dones, infos = step_outputs[:5]
+                        # 如果环境返回终止相关的AMP观测，则拼接到amp缓冲
+                        termination_ids = step_outputs[5] if len(step_outputs) > 5 else None
+                        termination_privileged_obs = step_outputs[6] if len(step_outputs) > 6 else None
+                    else:
+                        obs, privileged_obs, rewards, dones, infos = step_outputs
+                        termination_ids, termination_privileged_obs = None, None
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     infos = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in infos.items()}
-                    rewards = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in rewards.items()}
-                    obs, critic_obs, dones = obs.to(self.device), critic_obs.to(self.device), dones.to(self.device),
-                    total_rew = self.alg.process_env_step(rewards, dones, infos)
-                    
-                    if self.log_dir is not None:
-                        # Book keeping
-                        if 'episode' in infos:
-                            ep_infos.append(infos['episode'])
-                        cur_reward_sum += total_rew
-                        cur_reward_explr_sum += 0
-                        cur_reward_entropy_sum += 0
-                        cur_episode_length += 1
-                        
-                        new_ids = (dones > 0).nonzero(as_tuple=False)
-                        
-                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        rew_explr_buffer.extend(cur_reward_explr_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        rew_entropy_buffer.extend(cur_reward_entropy_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-                        
-                        cur_reward_sum[new_ids] = 0
-                        cur_reward_explr_sum[new_ids] = 0
-                        cur_reward_entropy_sum[new_ids] = 0
-                        cur_episode_length[new_ids] = 0
+                    rewards = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in rewards.items()} if isinstance(rewards, dict) else rewards.to(self.device)
+                    obs, critic_obs, dones = obs.to(self.device), critic_obs.to(self.device), dones.to(self.device)
+
+                    # ===== AMP帧收集：参考g1_16dof_moe_residual_env.get_amp_observations =====
+                    amp_obs_frames = None
+                    if self.use_amp and self.amp_obs_buffer is not None:
+                        # 获取当前帧AMP观测：若环境实现了get_amp_observations()
+                        if hasattr(self.env, 'get_amp_observations'):
+                            cur_amp_obs = self.env.get_amp_observations().to(self.device)
+                        elif hasattr(self.env, 'env') and hasattr(self.env.env, 'get_amp_observations'):
+                            # 某些VecEnv包装器可能在self.env.env下持有真实环境
+                            cur_amp_obs = self.env.env.get_amp_observations().to(self.device)
+                        else:
+                            cur_amp_obs = None
+                        if cur_amp_obs is not None and cur_amp_obs.shape[-1] == self.num_amp_obs:
+                            # 将当前帧写入循环缓冲：左移，最新帧放在最后
+                            self.amp_obs_buffer = torch.cat([self.amp_obs_buffer[:, 1:], cur_amp_obs.unsqueeze(1)], dim=1)
+                            amp_obs_frames = self.amp_obs_buffer.clone()
+                        else:
+                            amp_obs_frames = None
+
+                    # 根据算法类型适配 process_env_step() 签名
+                    if type(self.alg).__name__ == 'AMPPPOMulti':
+                        # AMPPPOMulti 需要 next_obs/next_critic_obs，且不返回值；用于日志的总奖励自行计算
+                        if isinstance(rewards, dict):
+                            total_rew = rewards.get('total', rewards.get('dense', 0)) + rewards.get('sparse', 0)
+                            if not isinstance(total_rew, torch.Tensor):
+                                total_rew = torch.tensor(total_rew, device=self.device).unsqueeze(1).repeat(self.env.num_envs, 1)
+                        else:
+                            total_rew = rewards
+                        self.alg.process_env_step(total_rew, dones, infos, next_obs=obs, next_critic_obs=critic_obs, amp_obs_frames=amp_obs_frames)
+                    else:
+                        total_rew = self.alg.process_env_step(rewards, dones, infos, amp_obs_frames=amp_obs_frames)
 
                 stop = time.time()
                 collection_time = stop - start
 
                 # Learning step
                 start = stop
-                self.alg.compute_returns(critic_obs)
-            
+                # 根据算法类型适配 compute_returns() 签名
+                if type(self.alg).__name__ == 'AMPPPOMulti':
+                    history = self.env.get_history_observations().to(self.device) if hasattr(self.env, 'get_history_observations') else None
+                    self.alg.compute_returns(critic_obs, history)
+                else:
+                    self.alg.compute_returns(critic_obs)
+
+            if self.log_dir is not None:
+                # Book keeping
+                if 'episode' in infos:
+                    ep_infos.append(infos['episode'])
+                cur_reward_sum += total_rew
+                cur_reward_explr_sum += 0
+                cur_reward_entropy_sum += 0
+                cur_episode_length += 1
+                
+                new_ids = (dones > 0).nonzero(as_tuple=False)
+                
+                rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                rew_explr_buffer.extend(cur_reward_explr_sum[new_ids][:, 0].cpu().numpy().tolist())
+                rew_entropy_buffer.extend(cur_reward_entropy_sum[new_ids][:, 0].cpu().numpy().tolist())
+                lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                
+                cur_reward_sum[new_ids] = 0
+                cur_reward_explr_sum[new_ids] = 0
+                cur_reward_entropy_sum[new_ids] = 0
+                cur_episode_length[new_ids] = 0
+
             # Learning step - 适配不同的算法返回值
             if self.alg.use_double_critic:
                 mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse = self.alg.update()
@@ -547,6 +684,9 @@ class OnPolicyRunner:
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
+        disc_loss_print = locs['mean_discriminator_loss'] if 'mean_discriminator_loss' in locs else locs.get('mean_disc_loss', 0.0)
+        disc_acc_print = locs['mean_discriminator_acc'] if 'mean_discriminator_acc' in locs else locs.get('mean_disc_acc', 0.0)
+
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
@@ -554,8 +694,8 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Discriminator loss:':>{pad}} {locs['mean_disc_loss']:.4f}\n"""
-                          f"""{'Discriminator accuracy:':>{pad}} {locs['mean_disc_acc']:.4f}\n"""
+                          f"""{'Discriminator loss:':>{pad}} {disc_loss_print:.4f}\n"""
+                          f"""{'Discriminator accuracy:':>{pad}} {disc_acc_print:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward (total):':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean reward (task):':>{pad}} {statistics.mean(locs['rewbuffer']) - statistics.mean(locs['rew_explr_buffer']):.2f}\n"""
@@ -572,6 +712,8 @@ class OnPolicyRunner:
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
                           f"""{'Estimator loss:':>{pad}} {locs['mean_estimator_loss']:.4f}\n"""
+                          f"""{'Discriminator loss:':>{pad}} {disc_loss_print:.4f}\n"""
+                          f"""{'Discriminator accuracy:':>{pad}} {disc_acc_print:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n""")
                         #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")
@@ -610,9 +752,18 @@ class OnPolicyRunner:
             state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
             state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
         
-        # 如果算法有discriminator优化器，也保存它的状态
-        if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
-            state_dict['disc_optimizer_state_dict'] = self.alg.disc_optimizer.state_dict()
+        # AMP 判别器权重与优化器
+        if getattr(self.alg, 'use_amp', False) and getattr(self.alg, 'discriminator', None) is not None:
+            state_dict['discriminator_state_dict'] = self.alg.discriminator.state_dict()
+            if hasattr(self.alg, 'optimizer_disc') and self.alg.optimizer_disc is not None:
+                state_dict['optimizer_disc_state_dict'] = self.alg.optimizer_disc.state_dict()
+                print("[Save] AMP启用：已保存判别器权重与优化器状态")
+            elif hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
+                # 兼容旧字段名
+                state_dict['optimizer_disc_state_dict'] = self.alg.disc_optimizer.state_dict()
+                print("[Save] AMP启用：检测到旧优化器字段名，已保存判别器优化器状态")
+        else:
+            print("[Save] AMP未启用或未检测到判别器：不保存判别器相关状态")
         
         torch.save(state_dict, path)
 
@@ -690,19 +841,53 @@ class OnPolicyRunner:
                         print(f"[Load] 警告: 无法加载Estimator优化器状态: {e}")
                 else:
                     print("[Load] checkpoint中没有Estimator优化器状态，将使用初始状态")
-            
-            # 如果算法有discriminator优化器，尝试加载
-            if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
-                if 'disc_optimizer_state_dict' in loaded_dict:
+
+        # AMP 判别器加载逻辑
+        if getattr(self.alg, 'use_amp', False):
+            if getattr(self.alg, 'discriminator', None) is not None:
+                print("[Load] AMP启用：尝试加载判别器状态")
+                if 'discriminator_state_dict' in loaded_dict:
                     try:
-                        print("[Load] 加载discriminator优化器状态...")
-                        self.alg.disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
-                        print("[Load] 成功加载discriminator优化器状态")
+                        self.alg.discriminator.load_state_dict(loaded_dict['discriminator_state_dict'])
+                        print("[Load] 成功加载判别器权重")
                     except (ValueError, KeyError) as e:
-                        print(f"[Load] 警告: 无法加载discriminator优化器状态: {e}")
-                        print("[Load] discriminator优化器将使用初始状态")
+                        print(f"[Load] 警告: 无法加载判别器权重: {e}")
                 else:
-                    print("[Load] checkpoint中没有discriminator优化器状态，将使用初始状态")
+                    print("[Load] checkpoint中不存在判别器权重，保持当前初始化状态")
+
+                if load_optimizer:
+                    opt_loaded = False
+                    if 'optimizer_disc_state_dict' in loaded_dict:
+                        try:
+                            if hasattr(self.alg, 'optimizer_disc') and self.alg.optimizer_disc is not None:
+                                self.alg.optimizer_disc.load_state_dict(loaded_dict['optimizer_disc_state_dict'])
+                                print("[Load] 成功加载判别器优化器状态")
+                                opt_loaded = True
+                            elif hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
+                                self.alg.disc_optimizer.load_state_dict(loaded_dict['optimizer_disc_state_dict'])
+                                print("[Load] 成功加载判别器优化器状态（兼容旧字段）")
+                                opt_loaded = True
+                        except (ValueError, KeyError) as e:
+                            print(f"[Load] 警告: 无法加载判别器优化器状态: {e}")
+                    if not opt_loaded and 'disc_optimizer_state_dict' in loaded_dict:
+                        try:
+                            if hasattr(self.alg, 'optimizer_disc') and self.alg.optimizer_disc is not None:
+                                self.alg.optimizer_disc.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
+                                print("[Load] 成功加载判别器优化器状态（来自旧key）")
+                                opt_loaded = True
+                            elif hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
+                                self.alg.disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
+                                print("[Load] 成功加载判别器优化器状态（旧字段与旧key）")
+                                opt_loaded = True
+                        except (ValueError, KeyError) as e:
+                            print(f"[Load] 警告: 无法加载判别器优化器状态（旧key）: {e}")
+                    if not opt_loaded:
+                        print("[Load] checkpoint中没有判别器优化器状态，将使用初始状态")
+            else:
+                print("[Load] AMP启用但未检测到判别器实例，跳过判别器加载")
+        else:
+            if 'discriminator_state_dict' in loaded_dict or 'optimizer_disc_state_dict' in loaded_dict or 'disc_optimizer_state_dict' in loaded_dict:
+                print("[Load] AMP未启用：检测到判别器相关状态但将跳过加载")
         
         # self.current_learning_iteration = loaded_dict['iter']
         print("*" * 80)

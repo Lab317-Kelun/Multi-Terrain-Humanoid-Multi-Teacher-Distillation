@@ -68,7 +68,12 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv
         num_actions = 12  # 12个关节动作
         
-        # 启用接触信息
+        # AMP 相关配置（不使用深度相机，但保留接口）
+        amp_motion_files = '/home/cft/zikang/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/resources/g1_amp_data/lafan_walk+run_50FPS'   # 可选：专家运动数据路径列表，留空表示不使用外部专家数据
+        num_amp_obs = num_actions  # 判别器输入维度，默认使用动作控制的下肢关节数
+        reference_state_initialization = True
+        reference_state_initialization_prob = 0.85
+        
         include_foot_contacts = True
         use_double_critic = True
         
@@ -417,6 +422,15 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         advantage_merge_weight = 0.5   # 优势函数合并权重
         dense_reward_weight = 1.0
         sparse_reward_weight = 0.25
+
+        use_amp = True
+        amp_loader_type = 'lafan_16dof_multi'
+        amp_loader_class_name = "G1_AMPLoader"
+        entropy_coef = 0.01
+        policy_learning_rate = 2e-4
+        
+        amp_replay_buffer_size = 100000
+        disc_learning_rate = 1e-3
         
     class runner(LeggedRobotCfgPPO.runner):
         """训练运行器配置"""
@@ -433,6 +447,14 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         load_run = -1
         checkpoint = -1
         resume_path = None
+
+        """ style rewards """
+        amp_reward_coef = 3 # scale of amp reward
+        num_amp_frames = 5
+        amp_num_preload_transitions = 1000
+        use_lerp = False
+        amp_task_reward_lerp = 0.5
+        amp_discr_hidden_dims = [1024, 512]
 
     class estimator(LeggedRobotCfgPPO.estimator):
         """状态估计器配置"""

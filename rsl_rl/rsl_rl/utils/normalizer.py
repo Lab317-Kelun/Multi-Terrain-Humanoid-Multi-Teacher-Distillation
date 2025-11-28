@@ -84,38 +84,39 @@ class Normalizer(nn.Module):
         self._new_sum += torch.sum(x, axis=0)  # 使用axis=0与MimicKit保持一致
         self._new_sum_sq += torch.sum(torch.square(x), axis=0)  # 使用axis=0与MimicKit保持一致
     
-    def update(self):
-        """
-        更新归一化统计信息（基于record的数据）
-        
-        参考MimicKit实现，但添加了new_count为0的检查以避免除零错误
-        """
+    def update(self, x=None):
         if self._mean_sq is None:
             self._mean_sq = self._calc_mean_sq(self._mean, self._std)
-        
-        # 注意：MimicKit在多进程环境下使用mp_util.reduce_sum，我们单进程直接使用
-        # 在正常训练流程中，new_count应该总是>0（因为每次update前都会record数据）
-        new_count = self._new_count
-        
-        # 与MimicKit保持一致：不检查new_count（假设总是>0）
-        # 如果new_count为0，这里会报错，但这是预期的（表示没有数据被record）
-        new_mean = self._new_sum / new_count
-        new_mean_sq = self._new_sum_sq / new_count
-        
-        new_total = self._count + new_count
-        w_old = self._count.type(torch.float32) / new_total.type(torch.float32)
-        w_new = float(new_count) / new_total.type(torch.float32)
-        
-        self._mean[:] = w_old * self._mean + w_new * new_mean
-        self._mean_sq[:] = w_old * self._mean_sq + w_new * new_mean_sq
-        self._count[:] = new_total
-        
-        self._std[:] = self._calc_std(self._mean, self._mean_sq)
-        
-        # 重置累积器（与MimicKit一致）
-        self._new_count = 0
-        self._new_sum[:] = 0
-        self._new_sum_sq[:] = 0
+        if x is not None:
+            if not isinstance(x, torch.Tensor):
+                x = torch.from_numpy(x)
+            x = x.to(self._mean.device).type(self.dtype)
+            d = self.get_shape()[0]
+            x = x.view(-1, d)
+            new_count = x.shape[0]
+            new_mean = torch.mean(x, dim=0)
+            new_mean_sq = torch.mean(x * x, dim=0)
+            new_total = self._count + new_count
+            w_old = self._count.type(torch.float32) / new_total.type(torch.float32)
+            w_new = float(new_count) / new_total.type(torch.float32)
+            self._mean[:] = w_old * self._mean + w_new * new_mean
+            self._mean_sq[:] = w_old * self._mean_sq + w_new * new_mean_sq
+            self._count[:] = new_total
+            self._std[:] = self._calc_std(self._mean, self._mean_sq)
+        else:
+            new_count = self._new_count
+            new_mean = self._new_sum / new_count
+            new_mean_sq = self._new_sum_sq / new_count
+            new_total = self._count + new_count
+            w_old = self._count.type(torch.float32) / new_total.type(torch.float32)
+            w_new = float(new_count) / new_total.type(torch.float32)
+            self._mean[:] = w_old * self._mean + w_new * new_mean
+            self._mean_sq[:] = w_old * self._mean_sq + w_new * new_mean_sq
+            self._count[:] = new_total
+            self._std[:] = self._calc_std(self._mean, self._mean_sq)
+            self._new_count = 0
+            self._new_sum[:] = 0
+            self._new_sum_sq[:] = 0
     
     def get_shape(self):
         """获取归一化器形状"""
@@ -156,6 +157,13 @@ class Normalizer(nn.Module):
         norm_x = (x - self._mean) / self._std
         norm_x = torch.clamp(norm_x, -self._clip, self._clip)
         return norm_x.type(self.dtype)
+
+    def normalize_torch(self, x, device):
+        """
+        与现有算法调用兼容的接口，包装为 normalize。
+        保留 device 形参以兼容现有签名。
+        """
+        return self.normalize(x)
     
     def unnormalize(self, norm_x):
         """
@@ -183,4 +191,3 @@ class Normalizer(nn.Module):
         mean_sq = torch.square(std) + torch.square(mean)
         mean_sq = mean_sq.type(self.dtype)
         return mean_sq
-

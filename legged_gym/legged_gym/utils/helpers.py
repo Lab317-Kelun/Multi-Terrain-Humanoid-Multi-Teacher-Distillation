@@ -174,6 +174,9 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.runner.load_run = args.load_run
         if args.checkpoint is not None:
             cfg_train.runner.checkpoint = args.checkpoint
+        if hasattr(args, 'use_amp') and args.use_amp is not None:
+            v = str(args.use_amp).lower()
+            cfg_train.algorithm.use_amp = (v in ("1", "true", "t", "yes", "y"))
 
     return env_cfg, cfg_train
 
@@ -212,7 +215,8 @@ def get_args():
         {"name": "--use_double_critic", "action": "store_true", "default": True, "help": "use double critic"},
         {"name": "--stage", "type": str, "default": "auto", "help": "stage"},
         {"name": "--proj_name", "type": str, "default": "beamdojo", "help": "proj_name"},
-    
+        {"name": "--use_amp", "type": str, "default": "false", "help": "enable AMP (true/false)"},
+        
     ]
     
     # parse arguments
