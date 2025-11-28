@@ -582,41 +582,43 @@ class PPODoubleReward:
 
     def build_amp_policy_frames(self, obs):
         """根据当前观测构建 AMP 观测序列 [N, num_amp_frames, state_dim]。
-        默认使用 proprio 维度作为 state_dim；历史帧来自观测尾部的展平历史。
+        默认使用 12 维动作历史（与 num_actions 对齐）作为判别器状态；
+        历史帧来自观测尾部的展平历史，每帧取 proprio 的末尾 12 维（action_history）。
         """
         if not self.use_amp or self.discriminator is None:
             return None
         num_envs = obs.shape[0]
         state_dim = self.discriminator.state_dim
-        # 当前 proprio
-        current_prop = obs[:, :self.num_prop]
-        # 历史观测（展平）重塑为 [N, num_hist, num_prop]
+        # 当前帧的 12 维动作历史（proprio 的末尾 12 维）
+        current_actions_12 = obs[:, :self.num_prop][:, -12:]
+        # 历史观测（展平）重塑为 [N, num_hist, num_prop]，并提取每帧末尾 12 维动作历史
         hist_flat = obs[:, -self.num_hist * self.num_prop:]
         hist = hist_flat.view(num_envs, self.num_hist, self.num_prop)
+        hist_actions_12 = hist[:, :, -12:]
 
         # 组装最近的 num_amp_frames：使用 (num_amp_frames-1) 个历史帧 + 当前帧
         frames_needed_hist = max(self.num_amp_frames - 1, 0)
         if frames_needed_hist > 0:
             take = min(frames_needed_hist, self.num_hist)
-            selected_hist = hist[:, -take:, :]
+            selected_hist = hist_actions_12[:, -take:, :]
         else:
-            selected_hist = current_prop.new_zeros((num_envs, 0, self.num_prop))
+            selected_hist = current_actions_12.new_zeros((num_envs, 0, 12))
 
-        frames = torch.cat([selected_hist, current_prop.unsqueeze(1)], dim=1)
+        frames = torch.cat([selected_hist, current_actions_12.unsqueeze(1)], dim=1)
         # 若不足 num_amp_frames，前面用零帧填充
         if frames.shape[1] < self.num_amp_frames:
             pad_len = self.num_amp_frames - frames.shape[1]
-            pad = current_prop.new_zeros((num_envs, pad_len, self.num_prop))
+            pad = current_actions_12.new_zeros((num_envs, pad_len, 12))
             frames = torch.cat([pad, frames], dim=1)
 
-        # 若判别器的 state_dim 与 num_prop 不一致，做安全裁剪或零填充
-        if self.num_prop == state_dim:
+        # 与判别器的 state_dim 对齐（通常为 12）
+        cur_dim = frames.shape[-1]
+        if cur_dim == state_dim:
             return frames
-        elif self.num_prop > state_dim:
+        elif cur_dim > state_dim:
             return frames[:, :, :state_dim]
         else:
-            # num_prop < state_dim，后面零填充
-            pad_feat = current_prop.new_zeros((num_envs, self.num_amp_frames, state_dim - self.num_prop))
+            pad_feat = current_actions_12.new_zeros((num_envs, self.num_amp_frames, state_dim - cur_dim))
             return torch.cat([frames, pad_feat], dim=-1)
 
     def update_counter(self):

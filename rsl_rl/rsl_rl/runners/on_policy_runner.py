@@ -162,6 +162,28 @@ class OnPolicyRunner:
                     task_reward_lerp=amp_task_reward_lerp,
                     use_lerp=use_lerp,
                 )
+                # 构建专家数据加载器（使用现成的 G1_AMPLoader）
+                try:
+                    from legged_gym.datasets.motion_loader_g1 import G1_AMPLoader
+                    motion_dir = getattr(self.env.cfg.env, 'amp_motion_files', None)
+                    if isinstance(motion_dir, str) and os.path.isdir(motion_dir):
+                        preload_transitions = True
+                        num_preload_transitions = int(self.cfg.get('amp_num_preload_transitions', 1000))
+                        # LAFAN 数据集为 50FPS，时间间隔按该频率采样
+                        time_between_frames = 1.0 / 50.0
+                        amp_data = G1_AMPLoader(
+                            device=self.device,
+                            time_between_frames=time_between_frames,
+                            motion_dir=motion_dir,
+                            preload_transitions=preload_transitions,
+                            num_preload_transitions=num_preload_transitions,
+                            num_frames=num_frames,
+                        )
+                        print(f"[Runner] AMP expert loader initialized from '{motion_dir}' with {num_frames} frames.")
+                    else:
+                        print(f"[Runner] AMP motion_dir invalid or not set: {motion_dir}. Expert data disabled.")
+                except Exception as e:
+                    print(f"[Runner] Failed to init AMP expert loader: {e}")
             except Exception as e:
                 print(f"[Runner] Failed to init AMP discriminator, disabling AMP: {e}")
                 self.alg_cfg['use_amp'] = False
@@ -173,7 +195,7 @@ class OnPolicyRunner:
         for k in [
             'amp_reward_mode', 'amp_reward_coef', 'num_amp_frames',
             'amp_num_preload_transitions', 'use_lerp', 'amp_task_reward_lerp',
-            'amp_discr_hidden_dims'
+            'amp_discr_hidden_dims', 'amp_loader_type'
         ]:
             if k in runner_cfg:
                 amp_params[k] = runner_cfg[k]
