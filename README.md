@@ -30,17 +30,17 @@ pip install "numpy<1.24" pydelatin wandb tqdm opencv-python ipdb pyfqmr flask
 `cd legged_gym/scripts`
 1. Train base policy:  
 ```
-python train.py --exptid=h1-2 --device=cuda:0 
+python3 train_beamdojo.py --task humanoid_beamdojo --device=cuda:0 --exptid=your_exptid_name 
 ```
 
 2. Resume Training:
 ```
-python train.py --exptid=h1-2 --device=cuda:0 --resume --resumeid=test --checkpoint=50000
+python3 train_beamdojo.py --task humanoid_beamdojo --device=cuda:0 --exptid=your_exptid_name --resumeid your_resume_exptid_name
 ```
 
 3. Play base policy:
 ```
-python play.py --exptid=test 
+python play.py --exptid=your_exptid_name 
 ```
 
 4. Record trace as dataset
@@ -63,6 +63,7 @@ python save_jit.py --exptid=test
 - --seed: random seed.
 - --no_wandb: no wandb logging.
 - --save: make dataset
+- --use_amp: use automatic mixed precision training. default is False.
 
 ### Acknowledgement ###
 
