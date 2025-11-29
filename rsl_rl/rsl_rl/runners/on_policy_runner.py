@@ -43,7 +43,6 @@ import datetime
 from rsl_rl.algorithms import PPO
 from rsl_rl.algorithms import PPOMirror
 from rsl_rl.algorithms.ppo_double_reward import PPODoubleReward
-from rsl_rl.algorithms.ppo_double_reward_amp import PPODoubleRewardAMP
 from rsl_rl.modules import *
 from rsl_rl.env import VecEnv
 import sys
@@ -75,28 +74,11 @@ class OnPolicyRunner:
             from rsl_rl.modules.actor_critic import ActorCriticRMADoubleReward
             actor_critic_class = ActorCriticRMADoubleReward
             print(f"Using {policy_class_name} for BEAMDOJO double critic")
-        elif policy_class_name == "ActorCriticRMADoubleRewardAMP":
-            from rsl_rl.modules.actor_critic_amp import ActorCriticRMADoubleRewardAMP
-            actor_critic_class = ActorCriticRMADoubleRewardAMP
-            print(f"Using {policy_class_name} for BEAMDOJO + AMP")
         else:
             actor_critic_class = ActorCriticRMA
             print(f"Using default {policy_class_name}")
                     
-        if policy_class_name == "ActorCriticRMADoubleRewardAMP":
-            actor_critic_kwargs = {
-                'num_prop': self.env.cfg.env.n_proprio,
-                'num_scan': self.env.cfg.env.n_scan,
-                'num_critic_obs': self.env.num_obs,
-                'num_priv_latent': self.env.cfg.env.n_priv_latent,
-                'num_priv_explicit': self.env.cfg.env.n_priv,
-                'num_hist': self.env.cfg.env.history_len,
-                'num_actions': self.env.num_actions,
-                'disc_obs_size':self.env.disc_obs_size,
-                **self.policy_cfg
-            }
-        elif policy_class_name == "ActorCriticRMADoubleReward":
-            # ActorCriticRMADoubleReward需要与ActorCriticRMADoubleRewardAMP相同的参数（除了disc_obs_size）
+        if policy_class_name == "ActorCriticRMADoubleReward":
             actor_critic_kwargs = {
                 'num_prop': self.env.cfg.env.n_proprio,
                 'num_scan': self.env.cfg.env.n_scan,
@@ -155,22 +137,10 @@ class OnPolicyRunner:
         # self.depth_encoder_criterion = nn.MSELoss()
         # Create algorithm
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        
-        # 如果是AMP算法，需要传递环境引用用于expert demonstration采样
-        if self.cfg["algorithm_class_name"] == "PPODoubleRewardAMP":
-            self.alg: PPO = alg_class(actor_critic, 
-                                      vec_env=self.env,  # 传递环境引用
-                                      estimator=estimator, 
-                                      estimator_cfg=self.estimator_cfg, 
-                                      depth_encoder=depth_encoder, 
-                                      depth_encoder_cfg=self.depth_encoder_cfg, 
-                                      depth_actor=depth_actor,
-                                      device=self.device, **self.alg_cfg)
-        else:
-            self.alg: PPO = alg_class(actor_critic, 
-                                      estimator, self.estimator_cfg, 
-                                      depth_encoder, self.depth_encoder_cfg, depth_actor,
-                                      device=self.device, **self.alg_cfg)
+        self.alg: PPO = alg_class(actor_critic, 
+                                  estimator, self.estimator_cfg, 
+                                  depth_encoder, self.depth_encoder_cfg, depth_actor,
+                                  device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
         self.dagger_update_freq = self.alg_cfg["dagger_update_freq"]
@@ -183,12 +153,6 @@ class OnPolicyRunner:
             'critic_obs_shape': [self.env.num_privileged_obs],
             'action_shape': [self.env.num_actions],
         }
-        
-        # 如果是AMP，添加disc_obs_shape
-        if policy_class_name == "ActorCriticRMADoubleRewardAMP":
-            storage_kwargs['disc_obs_shape'] = [self.env.disc_obs_size]
-            print(f"[AMP] Storage将包含disc_obs，形状: {[self.env.disc_obs_size]}")
-            
         self.alg.init_storage(**storage_kwargs)
 
         self.learn = self.learn_RL if not self.if_depth else self.learn_vision
@@ -205,8 +169,6 @@ class OnPolicyRunner:
         mean_value_loss = 0.
         mean_surrogate_loss = 0.
         mean_estimator_loss = 0.
-        mean_disc_loss = 0.
-        mean_disc_acc = 0.
         mean_hist_latent_loss = 0.
         mean_priv_reg_loss = 0. 
         priv_reg_coef = 0.
@@ -284,7 +246,7 @@ class OnPolicyRunner:
             if self.alg.use_double_critic:
                 mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef, mean_value_loss_dense, mean_value_loss_sparse = self.alg.update()
             else:
-                mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_disc_loss, mean_disc_acc, mean_priv_reg_loss, priv_reg_coef = self.alg.update()
+                mean_value_loss, mean_surrogate_loss, mean_estimator_loss, mean_discriminator_loss, mean_discriminator_acc, mean_priv_reg_loss, priv_reg_coef = self.alg.update()
             if hist_encoding:
                 print("Updating dagger...")
                 mean_hist_latent_loss = self.alg.update_dagger()
@@ -541,31 +503,16 @@ class OnPolicyRunner:
         wandb_dict['Loss/entropy_coef'] = locs['entropy_coef']
         wandb_dict['Loss/learning_rate'] = self.alg.learning_rate
         
-        # Discriminator loss (可能来自AMP)
+        # Discriminator loss (用于其他discriminator方法，如DIAYN)
         if 'mean_discriminator_loss' in locs:
             wandb_dict['Loss/discriminator'] = locs['mean_discriminator_loss']
             wandb_dict['Loss/discriminator_accuracy'] = locs['mean_discriminator_acc']
-        elif 'mean_disc_loss' in locs:
-            wandb_dict['Loss/discriminator'] = locs['mean_disc_loss']
-            wandb_dict['Loss/discriminator_accuracy'] = locs['mean_disc_acc']
         
         # 双Critic的额外loss
         if 'mean_value_loss_dense' in locs:
             wandb_dict['Loss/value_function_dense'] = locs['mean_value_loss_dense']
         if 'mean_value_loss_sparse' in locs:
             wandb_dict['Loss/value_function_sparse'] = locs['mean_value_loss_sparse']
-        
-        # AMP相关指标
-        if hasattr(self.alg, 'amp_metrics'):
-            amp_metrics = self.alg.amp_metrics
-            wandb_dict['AMP/disc_loss'] = amp_metrics.get('disc_loss', 0.0)
-            wandb_dict['AMP/disc_grad_penalty'] = amp_metrics.get('disc_grad_penalty', 0.0)
-            wandb_dict['AMP/disc_agent_acc'] = amp_metrics.get('disc_agent_acc', 0.0)
-            wandb_dict['AMP/disc_demo_acc'] = amp_metrics.get('disc_demo_acc', 0.0)
-            wandb_dict['AMP/disc_agent_logit'] = amp_metrics.get('disc_agent_logit', 0.0)
-            wandb_dict['AMP/disc_demo_logit'] = amp_metrics.get('disc_demo_logit', 0.0)
-            wandb_dict['AMP/task_reward_mean'] = amp_metrics.get('task_reward_mean', 0.0)
-            wandb_dict['AMP/amp_reward_mean'] = amp_metrics.get('amp_reward_mean', 0.0)
 
         wandb_dict['Policy/mean_noise_std'] = mean_std.item()
         wandb_dict['Perf/total_fps'] = fps
@@ -597,8 +544,8 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Discriminator loss:':>{pad}} {locs['mean_disc_loss']:.4f}\n"""
-                          f"""{'Discriminator accuracy:':>{pad}} {locs['mean_disc_acc']:.4f}\n"""
+                          f"""{'Discriminator loss:':>{pad}} {locs.get('mean_discriminator_loss', 0.0):.4f}\n"""
+                          f"""{'Discriminator accuracy:':>{pad}} {locs.get('mean_discriminator_acc', 0.0):.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
                           f"""{'Mean reward (total):':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean reward (task):':>{pad}} {statistics.mean(locs['rewbuffer']) - statistics.mean(locs['rew_explr_buffer']):.2f}\n"""
@@ -644,10 +591,6 @@ class OnPolicyRunner:
             state_dict['depth_encoder_state_dict'] = self.alg.depth_encoder.state_dict()
             state_dict['depth_actor_state_dict'] = self.alg.depth_actor.state_dict()
         
-        # 如果算法有discriminator优化器，也保存它的状态
-        if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
-            state_dict['disc_optimizer_state_dict'] = self.alg.disc_optimizer.state_dict()
-        
         torch.save(state_dict, path)
 
     def load(self, path, load_optimizer=True):
@@ -655,29 +598,7 @@ class OnPolicyRunner:
         print("Loading model from {}...".format(path))
         loaded_dict = torch.load(path, map_location=self.device)
         
-        # 加载actor_critic，允许缺少某些键（如discriminator）
-        model_state = loaded_dict['model_state_dict']
-        current_model_state = self.alg.actor_critic.state_dict()
-        
-        # 检查哪些键缺失
-        missing_keys = set(current_model_state.keys()) - set(model_state.keys())
-        unexpected_keys = set(model_state.keys()) - set(current_model_state.keys())
-        
-        if missing_keys:
-            print(f"[Load] 警告: 模型中有但checkpoint中缺失的键: {missing_keys}")
-            print(f"[Load] 这些键将保持初始化值（例如：discriminator将重新开始训练）")
-        
-        if unexpected_keys:
-            print(f"[Load] 警告: checkpoint中有但模型中不存在的键（将被忽略）: {unexpected_keys}")
-        
-        # 使用strict=False允许缺少某些键
-        load_result = self.alg.actor_critic.load_state_dict(model_state, strict=False)
-        
-        if load_result.missing_keys:
-            print(f"[Load] 实际缺失的键: {load_result.missing_keys}")
-        if load_result.unexpected_keys:
-            print(f"[Load] 实际多余的键: {load_result.unexpected_keys}")
-        
+        self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         self.alg.estimator.load_state_dict(loaded_dict['estimator_state_dict'])
         
         if self.if_depth:
@@ -693,29 +614,9 @@ class OnPolicyRunner:
                 print("No saved depth actor, Copying actor critic actor to depth actor...")
                 self.alg.depth_actor.load_state_dict(self.alg.actor_critic.actor.state_dict())
         
-        # 加载优化器（包括discriminator优化器）
+        # 加载优化器
         if load_optimizer:
-            try:
-                # 尝试加载优化器状态
-                self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
-                print("[Load] 成功加载主优化器状态")
-            except (ValueError, KeyError) as e:
-                # 如果参数组不匹配（例如：旧模型没有discriminator参数），跳过优化器加载
-                print(f"[Load] 警告: 无法加载优化器状态: {e}")
-                print("[Load] 优化器将使用初始状态（这对于从非AMP模型恢复是正常的）")
-            
-            # 如果算法有discriminator优化器，尝试加载
-            if hasattr(self.alg, 'disc_optimizer') and self.alg.disc_optimizer is not None:
-                if 'disc_optimizer_state_dict' in loaded_dict:
-                    try:
-                        print("[Load] 加载discriminator优化器状态...")
-                        self.alg.disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
-                        print("[Load] 成功加载discriminator优化器状态")
-                    except (ValueError, KeyError) as e:
-                        print(f"[Load] 警告: 无法加载discriminator优化器状态: {e}")
-                        print("[Load] discriminator优化器将使用初始状态")
-                else:
-                    print("[Load] checkpoint中没有discriminator优化器状态，将使用初始状态")
+            self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         
         # self.current_learning_iteration = loaded_dict['iter']
         print("*" * 80)
@@ -750,9 +651,3 @@ class OnPolicyRunner:
         if device is not None:
             self.alg.depth_encoder.to(device)
         return self.alg.depth_encoder
-    
-    def get_disc_inference_policy(self, device=None):
-        self.alg.discriminator.eval() # switch to evaluation mode (dropout for example)
-        if device is not None:
-            self.alg.discriminator.to(device)
-        return self.alg.discriminator.inference
