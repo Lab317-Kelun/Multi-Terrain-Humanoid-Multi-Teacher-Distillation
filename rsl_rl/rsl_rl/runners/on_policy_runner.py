@@ -524,14 +524,6 @@ class OnPolicyRunner:
             wandb_dict['Train/mean_reward_task'] = wandb_dict['Train/mean_reward'] - wandb_dict['Train/mean_reward_explr']
             wandb_dict['Train/mean_reward_entropy'] = statistics.mean(locs['rew_entropy_buffer'])
             wandb_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
-            
-            # 添加自定义参数记录示例
-            # 你可以在这里添加任何你想记录的参数
-            # wandb_dict['Custom/terrain_complexity'] = self.env.get_terrain_complexity_mean() if hasattr(self.env, 'get_terrain_complexity_mean') else 0
-            # wandb_dict['Custom/gap_success_rate'] = self.env.get_gap_success_rate() if hasattr(self.env, 'get_gap_success_rate') else 0
-            # wandb_dict['Custom/foot_contact_frequency'] = self.env.get_foot_contact_frequency() if hasattr(self.env, 'get_foot_contact_frequency') else 0
-            # wandb_dict['Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
-            # wandb_dict['Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
         wandb.log(wandb_dict, step=locs['it'])
 
