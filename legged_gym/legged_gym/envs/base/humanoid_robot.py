@@ -274,17 +274,9 @@ class HumanoidRobot(BaseTask):
         self.gym.end_access_image_tensors(self.sim)
 
     def _update_goals(self):
-        # 使用预定义的目标列表
         next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
-        if next_flag.any():
-            env_ids_to_update = next_flag.nonzero(as_tuple=False).flatten()
-            self.cur_goal_idx[env_ids_to_update] += 1
-            self.reach_goal_timer[env_ids_to_update] = 0
-            # 目标已切换，立即更新目标点
-            self.cur_goals[env_ids_to_update] = self._gather_cur_goals()[env_ids_to_update]
-            self.next_goals[env_ids_to_update] = self._gather_cur_goals(future=1)[env_ids_to_update]
-            # 重新计算期望到达时间
-            self._update_goal_timeout_from_speed(env_ids_to_update)
+        self.cur_goal_idx[next_flag] += 1
+        self.reach_goal_timer[next_flag] = 0
 
         self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < self.cfg.env.next_goal_threshold
         self.reach_goal_timer[self.reached_goal_ids] += 1
@@ -299,7 +291,7 @@ class HumanoidRobot(BaseTask):
         norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
         target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
         self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
-
+        
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations 
@@ -312,9 +304,6 @@ class HumanoidRobot(BaseTask):
 
         self.episode_length_buf += 1
         self.common_step_counter += 1
-        
-        # 更新目标到达超时计时器
-        self.goal_timeout_timer += self.dt
 
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
@@ -392,30 +381,21 @@ class HumanoidRobot(BaseTask):
         self.reset_buf = torch.zeros((self.num_envs, ), dtype=torch.bool, device=self.device)
         roll_cutoff = torch.abs(self.roll) > 0.8
         pitch_cutoff = torch.abs(self.pitch) > 0.8
+        reach_goal_cutoff = self.cur_goal_idx >= self.cfg.terrain.num_goals
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
-        length = self.cfg.terrain.terrain_length- 0.2
+        length = self.cfg.terrain.terrain_length - 0.2
         width = self.cfg.terrain.terrain_width - 0.2
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
+        
         boundary_cutoff = x_out_of_bounds | y_out_of_bounds
 
-        reach_goal_cutoff = self.cur_goal_idx >= self.cfg.terrain.num_goals
-                
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
 
-        self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
-        goal_threshold = self.cfg.env.next_goal_threshold
-        goal_not_reached = self.distance_to_goal >= goal_threshold
-        timeout_exceeded = self.goal_timeout_timer >= self.goal_timeout_duration
-        goal_timeout = timeout_exceeded & goal_not_reached
-        # print('self.goal_timeout_timer',self.goal_timeout_timer)
-        # print('self.goal_timeout_duration',self.goal_timeout_duration)
-
         self.reset_buf |= self.time_out_buf
-        self.reset_buf |= goal_timeout  # 超时未到达目标也终止
         self.reset_buf |= roll_cutoff
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
@@ -424,10 +404,8 @@ class HumanoidRobot(BaseTask):
 
         self.total_times += len(self.reset_buf.nonzero(as_tuple=False).flatten())
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
-        
-        # 计算完成度
         self.complete_times += (self.cur_goal_idx[self.reset_buf.nonzero(as_tuple=False).flatten()] / self.cfg.terrain.num_goals).sum()
-
+        
     def reset_idx(self, env_ids):
         """ Reset some environments.
             Calls self._reset_dofs(env_ids), self._reset_root_states(env_ids), and self._resample_commands(env_ids)
@@ -517,9 +495,6 @@ class HumanoidRobot(BaseTask):
             self.commands[env_ids, 2] = torch.where(small_command_mask, 
                                                     torch.zeros_like(ang_vel_cmd), 
                                                     ang_vel_cmd)
-        
-        # 只在重置时计算一次期望到达时间（根据当前速度命令）
-        self._update_goal_timeout_from_speed(env_ids)
         
         # fill extras
         self.extras["episode"] = {}
@@ -960,30 +935,6 @@ class HumanoidRobot(BaseTask):
         adaptive_speeds = adaptive_speeds.squeeze(1)
         
         return adaptive_speeds
-    
-    def _update_goal_timeout_from_speed(self, env_ids):
-        """根据当前速度命令计算期望到达时间（只在重置时调用一次）
-        
-        Args:
-            env_ids: 需要更新的环境ID列表
-        """
-        if len(env_ids) == 0:
-            return
-        
-        # 计算到目标点的距离
-        self.distance_to_goal[env_ids] = torch.norm(self.cur_goals[env_ids, :2] - self.root_states[env_ids, :2], dim=1)
-        
-        # 获取x方向的线速度（绝对值）
-        lin_vel_x = torch.abs(self.commands[env_ids, 0])
-        
-        # 计算期望到达时间 = 距离 / x速度
-        min_vel_x = 0.01  # 最小x速度阈值，避免除零
-        effective_vel_x = torch.clamp(lin_vel_x, min=min_vel_x)
-        expected_time = self.distance_to_goal[env_ids] / effective_vel_x
-        
-        # 更新期望到达时间并重置计时器（这条命令的计时从0开始）
-        self.goal_timeout_duration[env_ids] = expected_time
-        self.goal_timeout_timer[env_ids] = 0.0
 
     def _resample_commands(self, env_ids):
         if self.cfg.commands.height_adaptive_speed:
@@ -1216,11 +1167,7 @@ class HumanoidRobot(BaseTask):
 
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
         self.reach_goal_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
-        
-        # 目标到达超时相关缓冲区
-        self.goal_timeout_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 从设置速度开始的计时
-        self.goal_timeout_duration = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * 1000.0  # 期望到达时间（秒）
-        
+                
         # 动态计算高度采样点数
         num_height_points = len(self.cfg.terrain.measured_points_x) * len(self.cfg.terrain.measured_points_y)
         self.measured_heights = torch.zeros((self.num_envs, num_height_points), device=self.device)
@@ -1453,7 +1400,6 @@ class HumanoidRobot(BaseTask):
         self.num_bodies = self.gym.get_asset_rigid_body_count(robot_asset)
         dof_props_asset = self.gym.get_asset_dof_properties(robot_asset)
         rigid_shape_props_asset = self.gym.get_asset_rigid_shape_properties(robot_asset)
-
 
         # save body names from the asset
         self.body_names = self.gym.get_asset_rigid_body_names(robot_asset)

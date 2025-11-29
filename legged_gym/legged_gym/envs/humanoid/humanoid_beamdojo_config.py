@@ -261,6 +261,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
+            
+            # reach_goal = 0.0
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
@@ -322,8 +324,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
-            # "next_heading_tracking", 
-            # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
@@ -335,7 +335,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "contact_momentum", "action_vanish", "stand_still",
             # 'termination'
         ]
-        sparse_rewards = ['foothold']
+        sparse_rewards = ['foothold', 'reach_goal']
         
     class normalization:
         """归一化配置"""
