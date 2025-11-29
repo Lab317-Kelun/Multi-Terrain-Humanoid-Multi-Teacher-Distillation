@@ -629,7 +629,6 @@ class HumanoidRobot(BaseTask):
         noisy_ang_vel = noisy_ang_vel * self.obs_scales.ang_vel
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
-        # print(f"noisy_ang_vel: {noisy_ang_vel}")
         # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         # 获取步态相位观测
