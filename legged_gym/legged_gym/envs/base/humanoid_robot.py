@@ -276,17 +276,11 @@ class HumanoidRobot(BaseTask):
     def _generate_forward_goal(self, env_ids):
         """
         在机器人前方扇形区域内生成随机目标点（新增功能）
-        
-        参数:
-            env_ids: 需要生成目标的环境ID列表
-            
-        返回:
-            goals: 生成的目标点 [len(env_ids), 3] (x, y, z)
         """
         # 获取配置参数，如果没有设置则使用默认值
-        min_distance = getattr(self.cfg.env, 'goal_min_distance', 2.0)  # 最小距离（米）
-        max_distance = getattr(self.cfg.env, 'goal_max_distance', 5.0)  # 最大距离（米）
-        angle_range = getattr(self.cfg.env, 'goal_angle_range', 60.0)  # 角度范围（度），前方±60度
+        min_distance = getattr(self.cfg.env, 'goal_min_distance', 1.0)  # 最小距离（米）
+        max_distance = getattr(self.cfg.env, 'goal_max_distance', 4.0)  # 最大距离（米）
+        angle_range = getattr(self.cfg.env, 'goal_angle_range', 90.0)  # 角度范围（度），前方±60度
         
         num_envs = len(env_ids)
         
@@ -371,6 +365,9 @@ class HumanoidRobot(BaseTask):
                 
                 # 重置计时器
                 self.reach_goal_timer[env_ids_to_update] = 0
+                
+                # 目标已更新，重新计算期望到达时间
+                self._update_goal_timeout_from_speed(env_ids_to_update)
         else:
             # 原有逻辑：使用预定义的目标列表
             next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
@@ -403,6 +400,9 @@ class HumanoidRobot(BaseTask):
 
         self.episode_length_buf += 1
         self.common_step_counter += 1
+        
+        # 更新目标到达超时计时器
+        self.goal_timeout_timer += self.dt
 
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
@@ -427,6 +427,7 @@ class HumanoidRobot(BaseTask):
         
         # self._update_jump_schedule()
         self._update_goals()
+                
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
@@ -436,8 +437,7 @@ class HumanoidRobot(BaseTask):
         self.reset_idx(env_ids)
 
         # 只有在使用原有目标模式时才更新（前方目标模式已在reset_idx中更新）
-        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
-        if not use_forward_goals:
+        if not self.cfg.env.use_forward_goals:
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
 
@@ -481,20 +481,6 @@ class HumanoidRobot(BaseTask):
         self.reset_buf = torch.zeros((self.num_envs, ), dtype=torch.bool, device=self.device)
         roll_cutoff = torch.abs(self.roll) > 0.8
         pitch_cutoff = torch.abs(self.pitch) > 0.8
-        
-        # 检查是否使用前方目标模式
-        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
-        if use_forward_goals:
-            # 前方目标模式：使用配置中设置的目标数量
-            num_goals = getattr(self.cfg.env, 'num_goals', None)
-            if num_goals is None:
-                # 如果没有设置，使用地形配置中的目标数量作为默认值
-                num_goals = getattr(self.cfg.terrain, 'num_goals', 10)
-            reach_goal_cutoff = self.cur_goal_idx >= num_goals
-        else:
-            # 原有逻辑：使用预定义目标列表的终止条件
-            reach_goal_cutoff = self.cur_goal_idx >= self.cfg.terrain.num_goals
-        
         height_cutoff = self.root_states[:, 2] < 0.5
         
         # 检查机器人是否超出地形边界
@@ -503,12 +489,27 @@ class HumanoidRobot(BaseTask):
         relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
         x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
         y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
-        
         boundary_cutoff = x_out_of_bounds | y_out_of_bounds
 
+        if self.cfg.env.use_forward_goals:
+            # 前方目标模式：使用配置中设置的目标数量
+            num_goals = self.cfg.env.num_goals
+            reach_goal_cutoff = self.cur_goal_idx >= num_goals
+        else:
+            reach_goal_cutoff = self.cur_goal_idx >= self.cfg.terrain.num_goals
+                
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
 
+        self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
+        goal_threshold = self.cfg.env.next_goal_threshold
+        goal_not_reached = self.distance_to_goal >= goal_threshold
+        timeout_exceeded = self.goal_timeout_timer >= self.goal_timeout_duration
+        goal_timeout = timeout_exceeded & goal_not_reached
+        # print('self.goal_timeout_timer',self.goal_timeout_timer)
+        # print('self.goal_timeout_duration',self.goal_timeout_duration)
+
         self.reset_buf |= self.time_out_buf
+        self.reset_buf |= goal_timeout  # 超时未到达目标也终止
         self.reset_buf |= roll_cutoff
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
@@ -519,10 +520,8 @@ class HumanoidRobot(BaseTask):
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
         
         # 计算完成度：根据使用的目标数量
-        if use_forward_goals:
-            num_goals = getattr(self.cfg.env, 'num_goals', None)
-            if num_goals is None:
-                num_goals = getattr(self.cfg.terrain, 'num_goals', 10)
+        if self.cfg.env.use_forward_goals:
+            num_goals = self.cfg.env.num_goals
             self.complete_times += (self.cur_goal_idx[self.reset_buf.nonzero(as_tuple=False).flatten()] / num_goals).sum()
         else:
             self.complete_times += (self.cur_goal_idx[self.reset_buf.nonzero(as_tuple=False).flatten()] / self.cfg.terrain.num_goals).sum()
@@ -586,7 +585,6 @@ class HumanoidRobot(BaseTask):
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
-        self._resample_commands(env_ids)
         self.gym.simulate(self.sim)
         self.gym.fetch_results(self.sim, True)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
@@ -606,9 +604,7 @@ class HumanoidRobot(BaseTask):
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
         
-        # 检查是否使用前方目标模式（新增功能）
-        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
-        if use_forward_goals:
+        if self.cfg.env.use_forward_goals:
             # 更新基础状态（需要先更新才能计算yaw）
             self.base_quat[env_ids] = self.root_states[env_ids, 3:7]
             self.roll[env_ids], self.pitch[env_ids], self.yaw[env_ids] = euler_from_quaternion(self.base_quat[env_ids])
@@ -619,10 +615,12 @@ class HumanoidRobot(BaseTask):
             self.cur_goals[env_ids] = new_cur_goals
             self.next_goals[env_ids] = new_next_goals
         
-        # reset goal distance tracking for reach_goal reward
-        distance_to_goal = torch.norm(self.root_states[env_ids, :2] - self.cur_goals[env_ids, :2], dim=1)
-        self.last_distance_to_goal[env_ids] = distance_to_goal
-
+        # 在目标设置完成后，重新采样命令
+        self._resample_commands(env_ids)
+        
+        # 只在重置时计算一次期望到达时间（根据当前速度命令）
+        self._update_goal_timeout_from_speed(env_ids)
+        
         # fill extras
         self.extras["episode"] = {}
         for key in self.episode_sums.keys():
@@ -712,9 +710,11 @@ class HumanoidRobot(BaseTask):
                 self.episode_sums["termination"] += rew
     
     def compute_observations(self):
-        imu_obs = torch.stack((self.roll, self.pitch), dim=1)
-        self.delta_yaw = self.target_yaw - self.yaw
-        self.delta_next_yaw = self.next_target_yaw - self.yaw
+        # imu_obs = torch.stack((self.roll, self.pitch), dim=1)
+        self.delta_yaw = wrap_to_pi(self.target_yaw - self.yaw)
+        self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
+        self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+        self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
         
         # if self.global_counter % 5 == 0:
         #     # 添加调试信息
@@ -739,7 +739,19 @@ class HumanoidRobot(BaseTask):
         #     print("Linear velocity command X:", self.commands[0, 0])  # X方向线速度指令 - 机器人本体坐标系
         #     print("Angular velocity command Yaw:", self.commands[0, 2])  # Z轴角速度指令 - 机器人本体坐标系
         #     print("Heading command:", self.commands[0, 3])  # 朝向指令 - 世界坐标系
-            
+        
+        noisy_delta_yaw = self.get_noisy_measurement(
+            self.delta_yaw, 
+            self.cfg.noise.noise_scales.delta_yaw
+        )    
+        noisy_delta_pose_x = self.get_noisy_measurement(
+            self.delta_pose_x, 
+            self.cfg.noise.noise_scales.delta_pose_x
+        )  
+        noisy_delta_pose_y = self.get_noisy_measurement(
+            self.delta_pose_y, 
+            self.cfg.noise.noise_scales.delta_pose_y
+        )  
         noisy_dof_pos = self.get_noisy_measurement(
             self.dof_pos - self.default_dof_pos_all, 
             self.cfg.noise.noise_scales.dof_pos
@@ -756,6 +768,9 @@ class HumanoidRobot(BaseTask):
             self.projected_gravity, 
             self.cfg.noise.noise_scales.gravity
         )
+        noisy_delta_yaw = noisy_delta_yaw * self.obs_scales.delta_yaw
+        noisy_delta_pose_x = noisy_delta_pose_x * self.obs_scales.delta_pose_x
+        noisy_delta_pose_y = noisy_delta_pose_y * self.obs_scales.delta_pose_y
         noisy_dof_pos = noisy_dof_pos * self.obs_scales.dof_pos
         noisy_dof_vel = noisy_dof_vel * self.obs_scales.dof_vel
         noisy_ang_vel = noisy_ang_vel * self.obs_scales.ang_vel
@@ -783,6 +798,9 @@ class HumanoidRobot(BaseTask):
                             # self.action_history_buf[:, -1], # 12
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
+                            # noisy_delta_yaw[:, None],           # R^1 (带噪声的朝向误差)
+                            # noisy_delta_pose_x[:, None],        # R^1 (带噪声的X方向位置误差)
+                            # noisy_delta_pose_y[:, None],        # R^1 (带噪声的Y方向位置误差)
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
@@ -946,33 +964,9 @@ class HumanoidRobot(BaseTask):
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
 
-        # 检查是否使用前方目标模式
-        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
-        
-        if use_forward_goals:
-            # 前方目标模式：每个步骤都根据目标点更新角速度
-            # 计算从机器人到目标的方向向量
-            target_pos_rel = self.cur_goals[:, :2] - self.root_states[:, :2]
-            # 计算目标朝向（世界坐标系）
-            target_yaw = torch.atan2(target_pos_rel[:, 1], target_pos_rel[:, 0])
-            
-            # 使用heading命令模式：更新heading命令为目标朝向
-            self.commands[:, 3] = target_yaw
-            # 然后计算角速度
-            forward = quat_apply(self.base_quat, self.forward_vec)
-            heading = torch.atan2(forward[:, 1], forward[:, 0])
-            heading_error = wrap_to_pi(target_yaw - heading)
-            ang_vel_cmd = 0.8 * heading_error
-            small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
-            self.commands[:, 2] = torch.where(small_command_mask, 
-                                            torch.zeros_like(ang_vel_cmd), 
-                                            ang_vel_cmd)
-                
-        if self.cfg.commands.heading_command:
-            # 使用角速度命令模式：根据当前朝向和目标朝向计算角速度
-            current_yaw = self.yaw
-            heading_error = wrap_to_pi(target_yaw - current_yaw)
-            # 使用PD控制器计算角速度
+        if self.cfg.env.use_forward_goals:
+            self.commands[:, 3] = self.target_yaw
+            heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
             ang_vel_cmd = 0.8 * heading_error
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
@@ -983,16 +977,9 @@ class HumanoidRobot(BaseTask):
             self._push_robots()
         
         # 更新步态相位信息（用于交替步态）
-        self._update_gait_phase()
+        # self._update_gait_phase()
     
     def _update_gait_phase(self):
-        """
-        更新步态相位信息
-        
-        基于时间的固定周期相位，用于locomotion任务中的交替步态
-        相位周期：0.8秒（典型的人类行走周期）
-        左右脚相位偏移：0.5（180度，确保交替）
-        """
         period = 0.8  # 步态周期（秒）
         offset = 0.5  # 左右脚相位偏移（0.5 = 180度）
         
@@ -1098,8 +1085,31 @@ class HumanoidRobot(BaseTask):
         
         return adaptive_speeds
     
-    def _resample_commands(self, env_ids):
+    def _update_goal_timeout_from_speed(self, env_ids):
+        """根据当前速度命令计算期望到达时间（只在重置时调用一次）
         
+        Args:
+            env_ids: 需要更新的环境ID列表
+        """
+        if len(env_ids) == 0:
+            return
+        
+        # 计算到目标点的距离
+        self.distance_to_goal[env_ids] = torch.norm(self.cur_goals[env_ids, :2] - self.root_states[env_ids, :2], dim=1)
+        
+        # 获取x方向的线速度（绝对值）
+        lin_vel_x = torch.abs(self.commands[env_ids, 0])
+        
+        # 计算期望到达时间 = 距离 / x速度
+        min_vel_x = 0.01  # 最小x速度阈值，避免除零
+        effective_vel_x = torch.clamp(lin_vel_x, min=min_vel_x)
+        expected_time = self.distance_to_goal[env_ids] / effective_vel_x
+        
+        # 更新期望到达时间并重置计时器（这条命令的计时从0开始）
+        self.goal_timeout_duration[env_ids] = expected_time
+        self.goal_timeout_timer[env_ids] = 0.0
+
+    def _resample_commands(self, env_ids):
         if self.cfg.commands.height_adaptive_speed:
             adaptive_speeds = self._generate_adaptive_speed(env_ids)
             self.commands[env_ids, 0] = adaptive_speeds
@@ -1141,7 +1151,7 @@ class HumanoidRobot(BaseTask):
         self.commands[env_ids, 1] = torch.where(small_lin_vel_y_mask, 
                                                torch.zeros_like(self.commands[env_ids, 1]), 
                                                self.commands[env_ids, 1])
-        
+
 
     def _compute_torques(self, actions):
         """ Compute torques from actions.
@@ -1344,6 +1354,10 @@ class HumanoidRobot(BaseTask):
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
         self.reach_goal_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         
+        # 目标到达超时相关缓冲区
+        self.goal_timeout_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 从设置速度开始的计时
+        self.goal_timeout_duration = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * 1000.0  # 期望到达时间（秒）
+        
         # 动态计算高度采样点数
         num_height_points = len(self.cfg.terrain.measured_points_x) * len(self.cfg.terrain.measured_points_y)
         self.measured_heights = torch.zeros((self.num_envs, num_height_points), device=self.device)
@@ -1375,6 +1389,7 @@ class HumanoidRobot(BaseTask):
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self.distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 到目标点的距离（统一计算，避免重复）
         
         # 初始化步态相位相关变量
         self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -2254,10 +2269,10 @@ class HumanoidRobot(BaseTask):
 
     def _reward_reach_goal(self):
         """靠近目标奖励,远离目标惩罚"""
-        distance_to_goal = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1)
+        # 使用统一计算的缓冲区值，避免重复计算
         # 计算距离变化: 负值=靠近(给奖励), 正值=远离(给惩罚)
-        distance_change = distance_to_goal - self.last_distance_to_goal
-        self.last_distance_to_goal = distance_to_goal
+        distance_change = self.distance_to_goal - self.last_distance_to_goal
+        self.last_distance_to_goal = self.distance_to_goal
         # 返回负的距离变化: 靠近->正奖励, 远离->负惩罚
         return -distance_change
     

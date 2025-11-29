@@ -112,6 +112,9 @@ class LeggedRobotCfg(BaseConfig):
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
+            delta_yaw = 0.5
+            delta_pose_x = 0.0 
+            delta_pose_y = 0.0 
         clip_observations = 100.
         clip_actions = 1.2
     class noise:
@@ -126,6 +129,9 @@ class LeggedRobotCfg(BaseConfig):
             ang_vel = 0.05
             gravity = 0.02
             height_measurements = 0.02
+            delta_yaw = 0.0
+            delta_pose_x = 0.0
+            delta_pose_y = 0.0
 
     class commands:
         curriculum = False
