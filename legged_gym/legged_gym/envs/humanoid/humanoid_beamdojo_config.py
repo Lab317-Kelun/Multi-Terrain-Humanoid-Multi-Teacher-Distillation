@@ -61,7 +61,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 75  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=78
+        n_proprio = 78  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=78
         history_len = 10
         
         # 重新计算总观测维度
@@ -297,6 +297,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still = -0.15
             
             foothold = 0.05
+            goal_reached = -1.0  # 稀疏奖励：未到达目标点的惩罚
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -334,7 +335,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "contact_momentum", "action_vanish", "stand_still",
             # 'termination'
         ]
-        sparse_rewards = ['foothold']
+        sparse_rewards = ['foothold', 'goal_reached']
         
     class normalization:
         """归一化配置"""

@@ -387,6 +387,9 @@ class HumanoidRobot(BaseTask):
         norm = torch.norm(self.next_target_pos_rel, dim=-1, keepdim=True)
         target_vec_norm = self.next_target_pos_rel / (norm + 1e-5)
         self.next_target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+        
+        # 更新到目标点的距离（用于奖励计算）
+        self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
 
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
@@ -719,8 +722,8 @@ class HumanoidRobot(BaseTask):
     
     def compute_observations(self):
         # imu_obs = torch.stack((self.roll, self.pitch), dim=1)
-        self.delta_yaw = wrap_to_pi(self.target_yaw - self.yaw)
-        self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
+        self.delta_yaw = wrap_to_pi(self.commands[:, 3] - self.yaw)
+        # self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
         self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
         self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
                 
@@ -782,9 +785,9 @@ class HumanoidRobot(BaseTask):
                             # self.action_history_buf[:, -1], # 12
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
-                            # noisy_delta_yaw[:, None],           # R^1 (带噪声的朝向误差)
-                            # noisy_delta_pose_x[:, None],        # R^1 (带噪声的X方向位置误差)
-                            # noisy_delta_pose_y[:, None],        # R^1 (带噪声的Y方向位置误差)
+                            noisy_delta_yaw[:, None],           # R^1 (带噪声的朝向误差)
+                            noisy_delta_pose_x[:, None],        # R^1 (带噪声的X方向位置误差)
+                            noisy_delta_pose_y[:, None],        # R^1 (带噪声的Y方向位置误差)
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
@@ -2251,14 +2254,19 @@ class HumanoidRobot(BaseTask):
         next_heading_error = wrap_to_pi(self.next_target_yaw - self.yaw)
         return torch.exp(-torch.abs(next_heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
 
-    def _reward_reach_goal(self):
-        """靠近目标奖励,远离目标惩罚"""
-        # 使用统一计算的缓冲区值，避免重复计算
-        # 计算距离变化: 负值=靠近(给奖励), 正值=远离(给惩罚)
-        distance_change = self.distance_to_goal - self.last_distance_to_goal
-        self.last_distance_to_goal = self.distance_to_goal
-        # 返回负的距离变化: 靠近->正奖励, 远离->负惩罚
-        return -distance_change
+    def _reward_goal_reached(self):
+        # 判断是否到达目标点（基于距离阈值）
+        goal_threshold = self.cfg.env.next_goal_threshold
+        is_reached = self.distance_to_goal < goal_threshold
+        timeout_exceeded = self.goal_timeout_timer >= self.goal_timeout_duration
+        
+        # 确定走不到（超时且未到达）：给惩罚 -1 其他情况（到达或在路上未超时）：不给惩罚 0
+        is_failed = timeout_exceeded & ~is_reached
+        
+        reward = torch.where(is_failed,
+                            torch.ones_like(self.distance_to_goal),  # 确定走不到：-1惩罚
+                            torch.zeros_like(self.distance_to_goal))   # 到达或在路上：0（无惩罚）
+        return reward
     
     def _reward_center(self):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
