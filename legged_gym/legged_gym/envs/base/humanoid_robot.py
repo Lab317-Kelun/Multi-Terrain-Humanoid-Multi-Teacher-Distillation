@@ -617,6 +617,14 @@ class HumanoidRobot(BaseTask):
         
         # 在目标设置完成后，重新采样命令
         self._resample_commands(env_ids)
+        # if self.cfg.env.use_forward_goals:
+        #     self.commands[env_ids, 3] = self.target_yaw[env_ids]
+        #     heading_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
+        #     ang_vel_cmd = 0.8 * heading_error
+        #     small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
+        #     self.commands[:, 2] = torch.where(small_command_mask, 
+        #                                     torch.zeros_like(ang_vel_cmd), 
+        #                                     ang_vel_cmd)
         
         # 只在重置时计算一次期望到达时间（根据当前速度命令）
         self._update_goal_timeout_from_speed(env_ids)
@@ -715,31 +723,7 @@ class HumanoidRobot(BaseTask):
         self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
         self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
         self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
-        
-        # if self.global_counter % 5 == 0:
-        #     # 添加调试信息
-        #     # print("Robot position:", self.root_states[0, :2])  # 机器人位置 - 世界坐标系
-        #     # print("Env origin:", self.env_origins[0, :2])      # 环境原点 - 世界坐标系
-        #     # print("Base init state:", self.base_init_state[:2]) # 基础初始状态 - 相对环境原点坐标系
-        #     # print("Current goal (relative):", self.cur_goals[0, :2])      # 当前目标点 - 相对环境原点坐标系
-        #     # print("Next goal (relative):", self.next_goals[0, :2])        # 下一个目标点 - 相对环境原点坐标系
-        #     print("Current goal (world):", self.cur_goals[0, :2] + self.env_origins[0, :2])      # 当前目标点 - 世界坐标系
-        #     print("Next goal (world):", self.next_goals[0, :2] + self.env_origins[0, :2])        # 下一个目标点 - 世界坐标系
-        #     # print("Target pos rel:", self.target_pos_rel[0])   # 相对位置向量 - 机器人本体坐标系
-        #     print("Robot yaw:", self.yaw[0])                   # 机器人当前朝向 - 世界坐标系
-        #     print("Target yaw:", self.target_yaw[0])           # 目标朝向 - 世界坐标系
-        #     print("self.delta_yaw=",self.delta_yaw[0])
-        #     print("self.delta_next_yaw=",self.delta_next_yaw[0]) 
-            
-        #     print("######################################################################")
-            
-        #     # 添加速度和指令信息
-        #     print("Robot linear velocity:", self.base_lin_vel[0])  # 机器人线速度 - 机器人本体坐标系
-        #     print("Robot angular velocity:", self.base_ang_vel[0])  # 机器人角速度 - 机器人本体坐标系
-        #     print("Linear velocity command X:", self.commands[0, 0])  # X方向线速度指令 - 机器人本体坐标系
-        #     print("Angular velocity command Yaw:", self.commands[0, 2])  # Z轴角速度指令 - 机器人本体坐标系
-        #     print("Heading command:", self.commands[0, 3])  # 朝向指令 - 世界坐标系
-        
+                
         noisy_delta_yaw = self.get_noisy_measurement(
             self.delta_yaw, 
             self.cfg.noise.noise_scales.delta_yaw
@@ -1138,10 +1122,10 @@ class HumanoidRobot(BaseTask):
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
 
-        small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
-        self.commands[env_ids, 2] = torch.where(small_command_mask, 
-                                                torch.zeros_like(self.commands[env_ids, 2]), 
-                                                self.commands[env_ids, 2])
+            small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
+            self.commands[env_ids, 2] = torch.where(small_command_mask, 
+                                                    torch.zeros_like(self.commands[env_ids, 2]), 
+                                                    self.commands[env_ids, 2])
 
         small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
