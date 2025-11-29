@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 27     # 机器人总自由度：全身27个关节
-        episode_length_s = 35.0 #与课程学习有关 
+        episode_length_s = 20.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -68,12 +68,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv
         num_actions = 12  # 12个关节动作
         
-        num_goals = 4
-        
         # 启用接触信息
         include_foot_contacts = True
         use_double_critic = True
-        use_forward_goals = True
         
         next_goal_threshold = 0.3
         reach_goal_delay = 0.1
@@ -82,17 +79,17 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     # 课程学习配置
     class curriculum_config:
         # === 课程学习成功判定模式 ===
-        success_mode = 'goal_reached'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
+        success_mode = 'vel_tracking'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
         
         # === 成功率计算模式 (用于日志记录) ===
-        success_rate_mode = 'goal_based'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
+        success_rate_mode = 'survival_time'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
         
         # 目标到达模式参数
         success_threshold = 3  # 连续成功次数阈值
         failure_threshold = 2  # 连续失败次数阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 35.0  # 存活时间阈值（秒）
+        survival_time_threshold = 20.0  # 存活时间阈值（秒）
         survival_success_threshold = 3  # 连续存活成功次数阈值
         survival_failure_threshold = 2   # 连续存活失败次数阈值
         
@@ -241,7 +238,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """运动命令配置"""
         curriculum = True           # 是否启用课程学习
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
-        heading_command = False         # 启用朝向命令模式
+        heading_command = True         # 启用朝向命令模式
         ang_vel_clip = 0.05            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
@@ -251,10 +248,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.5, 0.5] # min max [m/s]
-            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+            lin_vel_x = [-0.8, 1.5] # min max [m/s]
+            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
-            heading = [-0.0, 0.0]
+            heading = [-1.2, 1.2]
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -262,30 +259,28 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         class scales:
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
-            tracking_ang_vel = 2.0 #2.0
-            heading_tracking = 1.0 #2.0 3.0
-            # next_heading_tracking = 0.5 #1.5 2.0
-            # reach_goal = 2.0
-            # center = -1.0 
+            tracking_ang_vel = 2.0
+            heading_tracking = 1.0
+            
+            terrain_onehot_similarity = 0.5
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
             orientation = -1.5 
             action_rate = -0.01
             
-            # base_height = -10.0
-            # tracking_base_height = 2.
+            tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
             dof_acc = -2.5e-7
             dof_pos_limits = -2.
-            feet_air_time = 1.0 #0.05 1.0
-            feet_clearance = -1.0 #-0.25 -1.0
-            feet_distance_lateral = 0.5  #0.5 0.5
-            knee_distance_lateral = 1.0 #1.0 1.0
+            feet_air_time = 0.05
+            feet_clearance = -0.25
+            feet_distance_lateral = 0.5  
+            knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
-            feet_parallel = -3.0 #-3.0 0.0
+            feet_parallel = -3.0
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
@@ -294,15 +289,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_vel_limits = -2e-3
             torque_limits = -0.1
             no_fly = 0.75
-            # joint_tracking_error = -0.1
             feet_slip = -0.25
             feet_contact_forces = -0.00025
             contact_momentum = 2.5e-4
             action_vanish = -1.0
-            stand_still = -0.15   
-            # termination = -20 #-10 -20 -30
+            stand_still = -0.15
             
-            foothold = 0.05 #1.0 0.05 0.15 0.25 0.1 0.12
+            foothold = 0.05
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -311,19 +304,22 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         soft_torque_limit = 0.95
         base_height_target = 0.74
         max_contact_force = 400.
-        least_feet_distance = 0.2 #0.2 0.18
-        least_feet_distance_lateral = 0.2 #0.2 0.18
-        most_feet_distance_lateral = 0.35 #0.35 0.25
-        most_knee_distance_lateral = 0.35 #0.35 0.25
-        least_knee_distance_lateral = 0.2 #0.2 0.18
-        clearance_height_target = 0.14 #0.14 0.18
+        least_feet_distance = 0.2
+        least_feet_distance_lateral = 0.2
+        most_feet_distance_lateral = 0.35
+        most_knee_distance_lateral = 0.35
+        least_knee_distance_lateral = 0.2
+        clearance_height_target = 0.14
         is_play = False
+        
+        foothold_foot_length = 0.12
+        foothold_foot_width = 0.06
+        foothold_height_tolerance = -0.1     
         
         foothold_foot_length = 0.12         # 脚长度 [m] 
         foothold_foot_width = 0.06          # 脚宽度 [m]
         foothold_height_tolerance = -0.1    # 高度容忍度 [m]
-        
-            
+               
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
@@ -331,7 +327,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            # "tracking_base_height", 
+            "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
