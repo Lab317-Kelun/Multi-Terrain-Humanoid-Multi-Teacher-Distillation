@@ -249,7 +249,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             lin_vel_x = [-0.8, 1.5] # min max [m/s]
             lin_vel_y = [-0.5, 0.5]   # min max [m/s]
             ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
-            heading = [-1.0, 1.0]
+            heading = [-1.2, 1.2]
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -391,6 +391,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         scan_encoder_dims = [128, 64, 32]
         priv_encoder_dims = [64, 20]
         terrain_onehot_encoder_dims = [16, 8]
+        terrain_onehot_history_encoder_dims = [128, 64, 32]  # 使用本体观测+高度图CNN特征预测terrain onehot的MLP隐藏层维度 (结构: 107 → 128 → 64 → 32 → 8)
         tanh_encoder_output = False  # 编码器输出是否使用tanh激活
         
         # 支持双Critic的编码器

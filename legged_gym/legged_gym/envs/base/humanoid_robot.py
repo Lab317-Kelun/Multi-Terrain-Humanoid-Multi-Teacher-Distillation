@@ -671,7 +671,7 @@ class HumanoidRobot(BaseTask):
         ), dim=-1)
         
         # 地形ID的onehot编码
-        self.terrain_onehot[:, 0] = 0.0  # 平地 -> [0,0,0]
+        self.terrain_onehot[:, 0] = 1.0  # 平地 -> [0,0,0]
         # print(f"self.terrain_onehot: {self.terrain_onehot}")
         
         if self.cfg.terrain.measure_heights:

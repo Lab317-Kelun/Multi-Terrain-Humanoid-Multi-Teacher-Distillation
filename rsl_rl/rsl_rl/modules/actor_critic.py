@@ -87,48 +87,38 @@ class StateHistoryEncoder(nn.Module):
 
 
 class TerrainOnehotHistoryEncoder(nn.Module):
-    """使用CNN从历史信息预测terrain onehot编码（类似StateHistoryEncoder）"""
-    def __init__(self, activation_fn, input_size, tsteps, output_size, tanh_encoder_output=False):
+    """使用本体观测+高度图CNN特征预测terrain onehot编码"""
+    def __init__(self, activation_fn, input_size, output_size, hidden_dims=None, tanh_encoder_output=False):
         super(TerrainOnehotHistoryEncoder, self).__init__()
         self.activation_fn = activation_fn
-        self.tsteps = tsteps
-
-        channel_size = 10
-
-        self.encoder = nn.Sequential(
-                nn.Linear(input_size, 3 * channel_size), self.activation_fn,
-                )
-        if tsteps == 50:
-            self.conv_layers = nn.Sequential(
-                nn.Conv1d(in_channels = 3 * channel_size, out_channels = 2 * channel_size, kernel_size = 8, stride = 4), self.activation_fn,
-                nn.Conv1d(in_channels = 2 * channel_size, out_channels = channel_size, kernel_size = 5, stride = 1), self.activation_fn,
-                nn.Conv1d(in_channels = channel_size, out_channels = channel_size, kernel_size = 5, stride = 1), self.activation_fn, 
-                nn.Flatten())
-        elif tsteps == 10:
-            self.conv_layers = nn.Sequential(
-                nn.Conv1d(in_channels = 3 * channel_size, out_channels = 2 * channel_size, kernel_size = 4, stride = 2), self.activation_fn,
-                nn.Conv1d(in_channels = 2 * channel_size, out_channels = channel_size, kernel_size = 2, stride = 1), self.activation_fn,
-                nn.Flatten())
-        elif tsteps == 20:
-            self.conv_layers = nn.Sequential(
-                nn.Conv1d(in_channels = 3 * channel_size, out_channels = 2 * channel_size, kernel_size = 6, stride = 2), self.activation_fn,
-                nn.Conv1d(in_channels = 2 * channel_size, out_channels = channel_size, kernel_size = 4, stride = 2), self.activation_fn,
-                nn.Flatten())
+        
+        # 如果没有指定hidden_dims，使用默认的隐藏层维度
+        if hidden_dims is None:
+            hidden_dims = [128, 64]
+        
+        # 构建MLP网络
+        layers = []
+        layers.append(nn.Linear(input_size, hidden_dims[0]))
+        layers.append(activation_fn)
+        
+        for i in range(len(hidden_dims) - 1):
+            layers.append(nn.Linear(hidden_dims[i], hidden_dims[i + 1]))
+            layers.append(activation_fn)
+        
+        layers.append(nn.Linear(hidden_dims[-1], output_size))
+        if tanh_encoder_output:
+            layers.append(nn.Tanh())
         else:
-            raise(ValueError("tsteps must be 10, 20 or 50"))
+            layers.append(activation_fn)
+        
+        self.mlp = nn.Sequential(*layers)
 
-        self.linear_output = nn.Sequential(
-                nn.Linear(channel_size * 3, output_size), self.activation_fn)
-
-    def forward(self, obs):
-        # nd * T * n_proprio
-        nd = obs.shape[0]
-        T = self.tsteps
-        projection = self.encoder(obs.reshape([nd * T, -1]))
-        output = self.conv_layers(projection.reshape([nd, T, -1]).permute((0, 2, 1)))
-        # 直接输出编码后的特征，维度为output_size（与terrain_onehot_encoder输出维度一致）
-        # 注意：这里不输出softmax，因为要与terrain_onehot_encoder的输出比较
-        return self.linear_output(output)
+    def forward(self, obs_prop_scan):
+        """
+        输入: obs_prop_scan [batch_size, num_prop + scan_encoder_output_dim]
+        输出: terrain onehot编码 [batch_size, output_size]
+        """
+        return self.mlp(obs_prop_scan)
 
 
 class CNNScanEncoder(nn.Module):
@@ -186,7 +176,8 @@ class Actor(nn.Module):
                  scan_cnn_output_dim=None,
                  scan_encoder_debug=False,
                  tanh_encoder_output=False,
-                 n_terrain_onehot=0) -> None:
+                 n_terrain_onehot=0,
+                 terrain_onehot_history_encoder_dims=None) -> None:
         super().__init__()
         # prop -> scan -> priv_explicit -> priv_latent -> hist
         # actor input: prop -> scan -> priv_explicit -> latent
@@ -229,7 +220,6 @@ class Actor(nn.Module):
             terrain_onehot_encoder_output_dim = self.n_terrain_onehot
 
         self.history_encoder = StateHistoryEncoder(activation, num_prop, num_hist, priv_encoder_output_dim)
-        self.terrain_onehot_history_encoder = TerrainOnehotHistoryEncoder(activation, num_prop, num_hist, terrain_onehot_encoder_output_dim)
    
         if self.if_scan_encode:
             if self.scan_encoder_type == 'cnn':
@@ -269,6 +259,15 @@ class Actor(nn.Module):
         else:
             self.scan_encoder = nn.Identity()
             self.scan_encoder_output_dim = num_scan
+        
+        # 初始化terrain_onehot_history_encoder，使用obs_prop_scan作为输入（本体观测+高度图CNN特征）
+        obs_prop_scan_input_size = num_prop + self.scan_encoder_output_dim
+        self.terrain_onehot_history_encoder = TerrainOnehotHistoryEncoder(
+            activation, 
+            obs_prop_scan_input_size, 
+            terrain_onehot_encoder_output_dim,
+            hidden_dims=terrain_onehot_history_encoder_dims
+        )
         
         self.actor_input_dim = num_prop + self.scan_encoder_output_dim + num_priv_explicit + priv_encoder_output_dim + terrain_onehot_encoder_output_dim
 
@@ -355,9 +354,15 @@ class Actor(nn.Module):
         return self.terrain_onehot_encoder(terrain_onehot)
     
     def infer_hist_terrain_onehot(self, obs):
-        """从历史信息推断terrain onehot编码（使用CNN），然后编码"""
-        hist = obs[:, -self.num_hist*self.num_prop:]
-        return self.terrain_onehot_history_encoder(hist.view(-1, self.num_hist, self.num_prop))
+        """使用本体观测+高度图CNN特征推断terrain onehot编码"""
+        # 构建obs_prop_scan: 本体观测 + 高度图CNN特征
+        if self.if_scan_encode:
+            obs_scan = obs[:, self.num_prop:self.num_prop + self.num_scan]
+            scan_latent = self.scan_encoder(obs_scan)
+            obs_prop_scan = torch.cat([obs[:, :self.num_prop], scan_latent], dim=1)
+        else:
+            obs_prop_scan = obs[:, :self.num_prop + self.num_scan]
+        return self.terrain_onehot_history_encoder(obs_prop_scan)
 
     def infer_scandots_latent(self, obs):
         scan = obs[:, self.num_prop:self.num_prop + self.num_scan]
@@ -398,6 +403,8 @@ class ActorCriticRMA(nn.Module):
                         **kwargs):
         supported_kwargs = {
             'priv_encoder_dims',
+            'terrain_onehot_encoder_dims',
+            'terrain_onehot_history_encoder_dims',
             'tanh_encoder_output',
             'scan_encoder_type',
             'scan_cnn_channels',
@@ -538,6 +545,8 @@ class ActorCriticRMADoubleReward(nn.Module):
                         **kwargs):
         supported_kwargs = {
             'priv_encoder_dims',
+            'terrain_onehot_encoder_dims',
+            'terrain_onehot_history_encoder_dims',
             'tanh_encoder_output',
             'scan_encoder_type',
             'scan_cnn_channels',
@@ -555,6 +564,7 @@ class ActorCriticRMADoubleReward(nn.Module):
         self.use_double_critic = use_double_critic
         priv_encoder_dims= kwargs.get('priv_encoder_dims', [])
         terrain_onehot_encoder_dims = kwargs.get('terrain_onehot_encoder_dims', [])
+        terrain_onehot_history_encoder_dims = kwargs.get('terrain_onehot_history_encoder_dims', None)
         tanh_encoder_output = kwargs.get('tanh_encoder_output', False)
         scan_encoder_type = kwargs.get('scan_encoder_type', 'mlp')
         scan_cnn_channels = kwargs.get('scan_cnn_channels')
@@ -586,6 +596,7 @@ class ActorCriticRMADoubleReward(nn.Module):
             scan_encoder_debug=scan_encoder_debug,
             tanh_encoder_output=tanh_encoder_output,
             n_terrain_onehot=n_terrain_onehot,
+            terrain_onehot_history_encoder_dims=terrain_onehot_history_encoder_dims,
         )
         
         # Critic网络

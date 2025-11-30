@@ -132,7 +132,6 @@ class PPODoubleReward:
             self.depth_actor = depth_actor
             self.depth_actor_optimizer = optim.Adam([*self.depth_actor.parameters(), *self.depth_encoder.parameters()], lr=depth_encoder_paras["learning_rate"], eps=adam_epsilon)
 
-
         print(f"PPODoubleReward initialized with use_double_critic={self.use_double_critic}")
         if self.use_double_critic:
             print(f"Dense reward weight: {self.dense_reward_weight}")
