@@ -191,7 +191,6 @@ class PPODoubleReward:
             
             self.transition.rewards_dense = rewards_dense.clone()
             self.transition.rewards_sparse = rewards_sparse.clone()
-
         else:
             # 如果是单一奖励，作为密集奖励处理
             rewards_total = rewards.clone()
