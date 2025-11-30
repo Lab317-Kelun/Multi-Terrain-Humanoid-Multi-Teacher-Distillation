@@ -2256,16 +2256,14 @@ class HumanoidRobot(BaseTask):
 
     def _reward_goal_reached(self):
         # 判断是否到达目标点（基于距离阈值）
+        self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
         goal_threshold = self.cfg.env.next_goal_threshold
         is_reached = self.distance_to_goal < goal_threshold
-        timeout_exceeded = self.goal_timeout_timer >= self.goal_timeout_duration
         
-        # 确定走不到（超时且未到达）：给惩罚 -1 其他情况（到达或在路上未超时）：不给惩罚 0
-        is_failed = timeout_exceeded & ~is_reached
-        
-        reward = torch.where(is_failed,
-                            torch.ones_like(self.distance_to_goal),  # 确定走不到：-1惩罚
-                            torch.zeros_like(self.distance_to_goal))   # 到达或在路上：0（无惩罚）
+        # 到达目标点：给奖励 1，没到达：0
+        reward = torch.where(is_reached,
+                            torch.ones_like(self.distance_to_goal),  # 到达：给奖励 1
+                            torch.zeros_like(self.distance_to_goal))  # 没到达：0
         return reward
     
     def _reward_center(self):
