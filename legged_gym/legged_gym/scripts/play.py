@@ -62,7 +62,7 @@ def play(args):
     env_cfg.rewards.is_play = True
 
     env_cfg.curriculum_config.success_mode = 'survival_time'
-    env_cfg.curriculum_config.survival_time_threshold = 6.0
+    env_cfg.curriculum_config.survival_time_threshold = 20.0
     env_cfg.curriculum_config.survival_success_threshold = 1  # 连续存活成功次数阈值
     env_cfg.curriculum_config.survival_failure_threshold = 2   # 连续存活失败次数阈值
 

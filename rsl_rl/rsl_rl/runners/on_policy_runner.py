@@ -567,6 +567,12 @@ class OnPolicyRunner:
                 elif success_rate_mode == 'goal_based':
                     # 方式2: 基于目标完成度计算成功率
                     success_rate = self.env.success_times / self.env.total_times
+                elif success_rate_mode == 'vel_tracking':
+                    # 方式3: 基于速度跟踪计算成功率（与课程升级一致）
+                    episode_len = torch.clip(self.env.episode_length_buf, min=1)
+                    avg_step_rew = self.env.episode_sums["tracking_x_vel"] / episode_len
+                    threshold = 0.6 * float(self.env.reward_scales["tracking_x_vel"])
+                    success_rate = (avg_step_rew > threshold).float().mean().item()
                 else:
                     # 未知模式,使用默认(目标模式)
                     print(f"Warning: Unknown success_rate_mode '{success_rate_mode}', using 'goal_based'")

@@ -83,7 +83,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         success_mode = 'vel_tracking'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
         
         # === 成功率计算模式 (用于日志记录) ===
-        success_rate_mode = 'survival_time'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
+        success_rate_mode = 'vel_tracking'  # 与课程升级判定保持一致
         
         # 目标到达模式参数
         success_threshold = 3  # 连续成功次数阈值
@@ -453,7 +453,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         amp_reward_coef = 3.0            # 判别器奖励系数（代替 amp_reward_weight）
         num_amp_frames = 5               # AMP 判别器状态序列帧数
         amp_num_preload_transitions = 1000
-        use_lerp = False                 # 是否使用判别器与任务奖励线性插值
+        use_lerp = False                 # 不启用lerp
         amp_task_reward_lerp = 0.0       # 插值权重，0表示仅判别器奖励，1表示仅任务奖励
         amp_discr_hidden_dims = [1024, 512]
 
