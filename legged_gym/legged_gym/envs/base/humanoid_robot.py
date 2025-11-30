@@ -721,21 +721,21 @@ class HumanoidRobot(BaseTask):
         # imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         self.delta_yaw = wrap_to_pi(self.target_yaw - self.yaw)
         self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
-        self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
-        self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
+        # self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+        # self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
                 
-        noisy_delta_yaw = self.get_noisy_measurement(
-            self.delta_yaw, 
-            self.cfg.noise.noise_scales.delta_yaw
-        )    
-        noisy_delta_pose_x = self.get_noisy_measurement(
-            self.delta_pose_x, 
-            self.cfg.noise.noise_scales.delta_pose_x
-        )  
-        noisy_delta_pose_y = self.get_noisy_measurement(
-            self.delta_pose_y, 
-            self.cfg.noise.noise_scales.delta_pose_y
-        )  
+        # noisy_delta_yaw = self.get_noisy_measurement(
+        #     self.delta_yaw, 
+        #     self.cfg.noise.noise_scales.delta_yaw
+        # )    
+        # noisy_delta_pose_x = self.get_noisy_measurement(
+        #     self.delta_pose_x, 
+        #     self.cfg.noise.noise_scales.delta_pose_x
+        # )  
+        # noisy_delta_pose_y = self.get_noisy_measurement(
+        #     self.delta_pose_y, 
+        #     self.cfg.noise.noise_scales.delta_pose_y
+        # )  
         noisy_dof_pos = self.get_noisy_measurement(
             self.dof_pos - self.default_dof_pos_all, 
             self.cfg.noise.noise_scales.dof_pos
@@ -752,9 +752,9 @@ class HumanoidRobot(BaseTask):
             self.projected_gravity, 
             self.cfg.noise.noise_scales.gravity
         )
-        noisy_delta_yaw = noisy_delta_yaw * self.obs_scales.delta_yaw
-        noisy_delta_pose_x = noisy_delta_pose_x * self.obs_scales.delta_pose_x
-        noisy_delta_pose_y = noisy_delta_pose_y * self.obs_scales.delta_pose_y
+        # noisy_delta_yaw = noisy_delta_yaw * self.obs_scales.delta_yaw
+        # noisy_delta_pose_x = noisy_delta_pose_x * self.obs_scales.delta_pose_x
+        # noisy_delta_pose_y = noisy_delta_pose_y * self.obs_scales.delta_pose_y
         noisy_dof_pos = noisy_dof_pos * self.obs_scales.dof_pos
         noisy_dof_vel = noisy_dof_vel * self.obs_scales.dof_vel
         noisy_ang_vel = noisy_ang_vel * self.obs_scales.ang_vel

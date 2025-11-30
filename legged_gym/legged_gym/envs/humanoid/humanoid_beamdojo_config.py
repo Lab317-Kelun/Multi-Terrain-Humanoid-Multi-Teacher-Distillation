@@ -296,7 +296,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             action_vanish = -1.0
             stand_still = -0.15
             
-            foothold = 0.05
+            # foothold = 0.05
             
         only_positive_rewards = False
         tracking_sigma = 0.25
