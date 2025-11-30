@@ -8,9 +8,11 @@ import mujoco.viewer
 from legged_gym import LEGGED_GYM_ROOT_DIR
 
 def load_config(config_path):
+    """加载并处理YAML配置文件"""
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
+    # 处理路径
     for key in ['policy_path', 'xml_path']:
         if key in config:
             path = config[key]
@@ -18,7 +20,8 @@ def load_config(config_path):
                 config[key] = os.path.join(LEGGED_GYM_ROOT_DIR, path[2:])
             elif '{LEGGED_GYM_ROOT_DIR}' in path:
                 config[key] = path.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
-                
+    
+    # 转换为numpy数组
     for key in ['kps', 'kds', 'default_angles', 'cmd_scale', 'cmd_init']:
         if key in config:
             config[key] = np.array(config[key], dtype=np.float32)
@@ -28,11 +31,11 @@ def load_config(config_path):
     config.setdefault('lidar_mode', 'terrain')
     config.setdefault('measure_heights', True)
     config.setdefault('obs_history_len', 10)
-    config.setdefault('print_period', 100) 
     
     return config
 
 def quat_to_rot(q):
+    """将四元数转换为旋转矩阵"""
     w, x, y, z = q
     return np.array([
         [1 - 2 * (y * y + z * z), 2 * (x * y - w * z),     2 * (x * z + w * y)],
@@ -41,17 +44,21 @@ def quat_to_rot(q):
     ], dtype=np.float32)
 
 def quat_rotate_inverse(q, v):
+    """将世界坐标系向量转换到机体坐标系"""
     R = quat_to_rot(q)
     return (R.T @ v).astype(np.float32)
 
 def get_gravity_orientation(quat):
+    """获取重力向量在机体坐标系中的方向"""
     gravity_vec = np.array([0.0, 0.0, -1.0])
     return quat_rotate_inverse(quat, gravity_vec)
 
 def pd_control(target_q, q, kp, target_dq, dq, kd):
+    """PD控制器：根据位置和速度误差计算力矩"""
     return (target_q - q) * kp + (target_dq - dq) * kd
 
 def get_scan_from_terrain(m, d, scan_points_body):
+    """从MuJoCo地形获取地形高度（世界坐标系z坐标）"""
     num_points = scan_points_body.shape[0]
     base_pos = d.qpos[:3]
     base_quat = d.qpos[3:7]
@@ -81,12 +88,16 @@ def get_scan_from_terrain(m, d, scan_points_body):
     return terrain_heights
 
 def compute_proprioceptive_obs(d, config, action, cmd):
+    """计算当前本体感受观测（75维）"""
     n_joints = d.qpos.shape[0] - 7
+    
+    # 获取状态
     qj = d.qpos[7:7+n_joints]
     dqj = d.qvel[6:6+n_joints]
     omega = d.qvel[3:6]
     quat = d.qpos[3:7]
     
+    # 处理默认角度
     default_angles = config['default_angles']
     if len(default_angles) < n_joints:
         padded_defaults = np.zeros(n_joints, dtype=np.float32)
@@ -94,6 +105,7 @@ def compute_proprioceptive_obs(d, config, action, cmd):
     else:
         padded_defaults = default_angles[:n_joints]
     
+    # 缩放并构建观测
     proprio_obs = np.zeros(75, dtype=np.float32)
     proprio_obs[0:3] = cmd[:3] * config['cmd_scale']
     proprio_obs[3:6] = omega * config['ang_vel_scale']
@@ -104,7 +116,8 @@ def compute_proprioceptive_obs(d, config, action, cmd):
     
     return proprio_obs
 
-def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf):
+def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, debug=False):
+    """计算完整的RMA格式观测向量（1082维）"""
     # 本体感受观测（75维）
     proprio_obs = compute_proprioceptive_obs(d, config, action, cmd)
     
@@ -123,12 +136,34 @@ def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_hi
     # 拼接：proprio(75) + heights(225) + priv_explicit(3) + priv_latent(29) + history(750)
     full_obs = np.concatenate([proprio_obs, heights, priv_explicit, priv_latent, obs_history_buf.flatten()]).astype(np.float32)
     
+    # 调试信息
+    if debug:
+        print("\n" + "="*60)
+        print("观测维度信息:")
+        print(f"  本体感受观测 (proprio_obs): {proprio_obs.shape[0]} 维")
+        print(f"  高度观测 (heights): {heights.shape[0]} 维")
+        print(f"  特权显式 (priv_explicit): {priv_explicit.shape[0]} 维")
+        print(f"  特权隐式 (priv_latent): {priv_latent.shape[0]} 维")
+        print(f"  历史信息 (history): {obs_history_buf.flatten().shape[0]} 维")
+        print(f"  总观测维度 (full_obs): {full_obs.shape[0]} 维")
+        print("\n观测统计信息:")
+        print(f"  proprio_obs: min={proprio_obs.min():.4f}, max={proprio_obs.max():.4f}, mean={proprio_obs.mean():.4f}, std={proprio_obs.std():.4f}")
+        print(f"  heights: min={heights.min():.4f}, max={heights.max():.4f}, mean={heights.mean():.4f}, std={heights.std():.4f}")
+        print(f"  priv_explicit: {priv_explicit}")
+        print(f"  priv_latent: {priv_latent}")
+        print(f"  history: min={obs_history_buf.min():.4f}, max={obs_history_buf.max():.4f}, mean={obs_history_buf.mean():.4f}")
+        print(f"  full_obs: min={full_obs.min():.4f}, max={full_obs.max():.4f}, mean={full_obs.mean():.4f}, std={full_obs.std():.4f}")
+        print("="*60 + "\n")
+    
     return full_obs, proprio_obs
 
 def main():
+    """主函数：运行MuJoCo仿真并控制机器人"""
+    # 加载配置
     config_path = os.path.join('deploy_mujoco/configs/g1.yaml')
     config = load_config(config_path)
     
+    # 加载模型
     m = mujoco.MjModel.from_xml_path(config['xml_path'])
     d = mujoco.MjData(m)
     m.opt.timestep = config['simulation_dt']
@@ -153,7 +188,7 @@ def main():
     
     print(f"\n扫描点配置:")
     print(f"  扫描范围: [-{scan_range}, {scan_range}] m")
-    print(f"  扫描分辨率: {scan_resolution}*{scan_resolution} = {num_scan} 个点")
+    print(f"  扫描分辨率: {scan_resolution}×{scan_resolution} = {num_scan} 个点")
     
     # 初始化变量
     action = np.zeros(num_actions, dtype=np.float32)
@@ -164,14 +199,13 @@ def main():
     
     # 计算总观测维度
     total_obs_dim = 75 + num_scan + 3 + 29 + obs_history_len * 75
-    print(f"\n{'='*60}")
-    print("观测维度配置:")
-    print(f"  本体感受观测 (proprio): 75 维")
-    print(f"  高度扫描 (heights): {num_scan} 维")
-    print(f"  特权显式 (priv_explicit): 3 维")
-    print(f"  特权隐式 (priv_latent): 29 维")
-    print(f"  历史信息 (history): {obs_history_len} × 75 = {obs_history_len * 75} 维")
-    print(f"  总观测维度 (total): {total_obs_dim} 维")
+    print(f"\n观测维度配置:")
+    print(f"  本体感受观测: 75 维")
+    print(f"  高度扫描: {num_scan} 维")
+    print(f"  特权显式: 3 维")
+    print(f"  特权隐式: 29 维")
+    print(f"  历史信息: {obs_history_len} × 75 = {obs_history_len * 75} 维")
+    print(f"  总观测维度: {total_obs_dim} 维")
     print(f"{'='*60}\n")
     
     # 加载策略模型
@@ -181,9 +215,7 @@ def main():
     print("策略模型加载成功!\n")
     
     counter = 0
-    control_counter = 0  # 控制周期计数器
-    print_period = config.get('print_period', 100)
-    
+    debug_counter = 0  # 调试信息计数器
     with mujoco.viewer.launch_passive(m, d) as viewer:
         start = time.time()
         while viewer.is_running() and time.time() - start < config['simulation_duration']:
@@ -218,7 +250,8 @@ def main():
             counter += 1
             if counter % config['control_decimation'] == 0:
                 # 计算观测并更新历史
-                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf)
+                debug_flag = (debug_counter < 3)  # 前3次控制周期打印调试信息
+                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, debug=debug_flag)
                 obs_history_buf = np.roll(obs_history_buf, -1, axis=0)
                 obs_history_buf[-1] = proprio_obs
                 
@@ -229,22 +262,21 @@ def main():
                 
                 target_dof_pos = action[:num_actions] * config['action_scale'] + config['default_angles']
                 
-                control_counter += 1
+                # 调试信息：动作输出
+                if debug_flag:
+                    print(f"\n控制周期 #{debug_counter + 1}:")
+                    print(f"  动作输出维度: {action.shape[0]}")
+                    print(f"  动作统计: min={action.min():.4f}, max={action.max():.4f}, mean={action.mean():.4f}")
+                    print(f"  目标关节位置: {target_dof_pos[:6]} ... (前6个关节)")
+                    print(f"  速度指令: {cmd}")
+                    print(f"  基座位置: [{d.qpos[0]:.3f}, {d.qpos[1]:.3f}, {d.qpos[2]:.3f}]")
+                    print(f"  基座高度: {d.qpos[2]:.3f} m\n")
                 
-                # 每 print_period 个控制周期打印一次观测和动作
-                if control_counter % print_period == 0:
-                    print(f"\n{'='*60}")
-                    print(f"控制周期 #{control_counter}")
-                    print(f"{'='*60}")
-                    print(f"\n输入观测 (维度: {full_obs.shape[0]}):")
-                    print(f"  本体感受观测 (proprio, 0-74): {full_obs[0:75]}")
-                    print(f"  高度扫描 (heights, 75-299): {full_obs[75:75+num_scan]}")
-                    print(f"  特权显式 (priv_explicit, 300-302): {full_obs[75+num_scan:75+num_scan+3]}")
-                    print(f"  特权隐式 (priv_latent, 303-331): {full_obs[75+num_scan+3:75+num_scan+3+29]}")
-                    print(f"  历史信息 (history, 332-1081): {full_obs[75+num_scan+3+29:]}")
-                    print(f"\n输出动作 (维度: {action.shape[0]}):")
-                    print(f"  {action}")
-                    print(f"{'='*60}\n")
+                debug_counter += 1
+                
+                # 每100个控制周期打印一次简要信息
+                if debug_counter > 0 and debug_counter % 100 == 0:
+                    print(f"[控制周期 {debug_counter}] 基座高度: {d.qpos[2]:.3f} m, 速度指令: {cmd}, 动作均值: {action[:num_actions].mean():.4f}")
             
             viewer.sync()
             time_until_next_step = m.opt.timestep - (time.time() - step_start)

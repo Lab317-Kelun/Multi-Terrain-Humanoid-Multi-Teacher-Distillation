@@ -1,7 +1,12 @@
+# ========== 路径配置 ==========
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/deploy_mujoco/models/model_jit.pt"
+policy_path: "/home/cft/zikang/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/deploy_mujoco/models/model_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
-xml_path: "./resources/robots/g1_description/g1.xml"
+# xml_path: "./resources/robots/g1_description/g1_only.xml"
+# xml_path: "./resources/robots/g1_description/gap.xml"
+# xml_path: "./resources/robots/g1_description/pit.xml"
+# xml_path: "./resources/robots/g1_description/rough.xml"
+xml_path: "./resources/robots/g1_description/stairs.xml"
 
 # ========== 功能开关配置 ==========
 use_lidar: true          # 是否使用雷达扫描数据
