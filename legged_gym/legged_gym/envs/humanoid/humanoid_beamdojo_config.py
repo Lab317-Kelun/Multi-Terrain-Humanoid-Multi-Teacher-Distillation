@@ -264,7 +264,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
-              
+            
+            goal_reached = -1.0
+        
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
             orientation = -1.5 
@@ -296,7 +298,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             action_vanish = -1.0
             stand_still = -0.15
             
-            foothold = 0.05
+            # foothold = 0.05
             goal_reached = -1.0  # 稀疏奖励：未到达目标点的惩罚
             
         only_positive_rewards = False
