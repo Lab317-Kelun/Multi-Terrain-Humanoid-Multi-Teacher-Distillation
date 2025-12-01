@@ -646,8 +646,8 @@ class HumanoidRobot(BaseTask):
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
                             noisy_gravity,           # R^3 (带噪声的重力)
-                            noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
-                            noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
+                            noisy_dof_pos[:, :12],   # R^{12} - 只使用下半身（腿部）关节位置！
+                            noisy_dof_vel[:, :12],   # R^{12} - 只使用下半身（腿部）关节速度！
                             self.action_history_buf[:, -1, :12], # R^{12}
                             ), dim=-1)
         
