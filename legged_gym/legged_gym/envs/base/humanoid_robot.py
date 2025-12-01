@@ -1316,11 +1316,14 @@ class HumanoidRobot(BaseTask):
         if curriculum_cfg.success_mode == 'goal_reached' and self.next_goal_threshold_curriculum_enabled:
             if self.total_times > 0:
                 current_success_rate = self.success_times / self.total_times
-                # 如果成功率超过阈值，降低 next_goal_threshold
-                if current_success_rate >= self.next_goal_threshold_success_rate:
-                    new_threshold = self.cfg.env.next_goal_threshold - self.next_goal_threshold_step
-                    # 确保不低于目标值
-                    self.cfg.env.next_goal_threshold = max(self.next_goal_threshold_target, new_threshold)
+                # 成功率 < 0.7：阈值固定为 0.5
+                # 成功率 0.7-1.0：阈值从 0.5 线性映射到 0.2
+                if current_success_rate < self.next_goal_threshold_success_rate:
+                    self.cfg.env.next_goal_threshold = self.next_goal_threshold_init
+                else:
+                    # 线性映射：success_rate [0.7, 1.0] -> threshold [0.5, 0.2]
+                    progress = (current_success_rate - self.next_goal_threshold_success_rate) / (1.0 - self.next_goal_threshold_success_rate)
+                    self.cfg.env.next_goal_threshold = self.next_goal_threshold_init - progress * (self.next_goal_threshold_init - self.next_goal_threshold_target)
 
 
     def _init_buffers(self):
@@ -2280,28 +2283,28 @@ class HumanoidRobot(BaseTask):
     def _reward_goal_reached(self):
         # 原本的实现（已注释）
         # # 判断是否到达目标点（基于距离阈值）
-        self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
-        goal_threshold = self.cfg.env.next_goal_threshold
-        print('goal_threshold', goal_threshold)
-        is_reached = self.distance_to_goal < goal_threshold
-        
-        # 到达目标点：给奖励 1，没到达：0
-        reward = torch.where(is_reached,
-                            torch.ones_like(self.distance_to_goal),  # 到达：给奖励 1
-                            torch.zeros_like(self.distance_to_goal))  # 没到达：0
-        return reward
-        
         # self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
         # goal_threshold = self.cfg.env.next_goal_threshold
         # print('goal_threshold', goal_threshold)
-        # reward_range = 0.3
-        # max_reward_distance = goal_threshold + reward_range
-        # sigma = reward_range / 3.0
+        # is_reached = self.distance_to_goal < goal_threshold
         
-        # reward = torch.exp(-(self.distance_to_goal - goal_threshold) / sigma)
-        # reward = torch.where(self.distance_to_goal < max_reward_distance, reward, torch.zeros_like(reward))
-        
+        # # 到达目标点：给奖励 1，没到达：0
+        # reward = torch.where(is_reached,
+        #                     torch.ones_like(self.distance_to_goal),  # 到达：给奖励 1
+        #                     torch.zeros_like(self.distance_to_goal))  # 没到达：0
         # return reward
+        
+        self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
+        goal_threshold = self.cfg.env.next_goal_threshold
+        print('goal_threshold', goal_threshold)
+        reward_range = 0.3
+        max_reward_distance = goal_threshold + reward_range
+        sigma = reward_range / 3.0
+        
+        reward = torch.exp(-(self.distance_to_goal - goal_threshold) / sigma)
+        reward = torch.where(self.distance_to_goal < max_reward_distance, reward, torch.zeros_like(reward))
+        
+        return reward
     
     def _reward_center(self):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
