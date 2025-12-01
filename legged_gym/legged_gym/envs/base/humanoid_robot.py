@@ -1311,6 +1311,16 @@ class HumanoidRobot(BaseTask):
         if not use_forward_goals:
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
+        
+        # 更新 next_goal_threshold 课程学习（基于成功率，与rsl_rl中的计算方式一致）
+        if curriculum_cfg.success_mode == 'goal_reached' and self.next_goal_threshold_curriculum_enabled:
+            if self.total_times > 0:
+                current_success_rate = self.success_times / self.total_times
+                # 如果成功率超过阈值，降低 next_goal_threshold
+                if current_success_rate >= self.next_goal_threshold_success_rate:
+                    new_threshold = self.cfg.env.next_goal_threshold - self.next_goal_threshold_step
+                    # 确保不低于目标值
+                    self.cfg.env.next_goal_threshold = max(self.next_goal_threshold_target, new_threshold)
 
 
     def _init_buffers(self):
@@ -1455,6 +1465,19 @@ class HumanoidRobot(BaseTask):
         self.height_update_interval = 1
         if hasattr(self.cfg.env, "height_update_dt"):
             self.height_update_interval = int(self.cfg.env.height_update_dt / (self.cfg.sim.dt * self.cfg.control.decimation))
+        
+        # 初始化 next_goal_threshold 课程学习
+        curriculum_cfg = getattr(self.cfg, 'curriculum_config', None)
+        if curriculum_cfg and getattr(curriculum_cfg, 'next_goal_threshold_curriculum', False):
+            self.next_goal_threshold_curriculum_enabled = True
+            self.next_goal_threshold_init = curriculum_cfg.next_goal_threshold_init
+            self.next_goal_threshold_target = curriculum_cfg.next_goal_threshold_target
+            self.next_goal_threshold_step = curriculum_cfg.next_goal_threshold_step
+            self.next_goal_threshold_success_rate = curriculum_cfg.next_goal_threshold_success_rate
+            # 设置初始阈值
+            self.cfg.env.next_goal_threshold = self.next_goal_threshold_init
+        else:
+            self.next_goal_threshold_curriculum_enabled = False
 
         if self.cfg.depth.use_camera:
             self.depth_buffer = torch.zeros(self.num_envs,  
@@ -2255,9 +2278,11 @@ class HumanoidRobot(BaseTask):
         return torch.exp(-torch.abs(next_heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
 
     def _reward_goal_reached(self):
-        # 判断是否到达目标点（基于距离阈值）
+        # 原本的实现（已注释）
+        # # 判断是否到达目标点（基于距离阈值）
         self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
         goal_threshold = self.cfg.env.next_goal_threshold
+        print('goal_threshold', goal_threshold)
         is_reached = self.distance_to_goal < goal_threshold
         
         # 到达目标点：给奖励 1，没到达：0
@@ -2265,6 +2290,18 @@ class HumanoidRobot(BaseTask):
                             torch.ones_like(self.distance_to_goal),  # 到达：给奖励 1
                             torch.zeros_like(self.distance_to_goal))  # 没到达：0
         return reward
+        
+        # self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
+        # goal_threshold = self.cfg.env.next_goal_threshold
+        # print('goal_threshold', goal_threshold)
+        # reward_range = 0.3
+        # max_reward_distance = goal_threshold + reward_range
+        # sigma = reward_range / 3.0
+        
+        # reward = torch.exp(-(self.distance_to_goal - goal_threshold) / sigma)
+        # reward = torch.where(self.distance_to_goal < max_reward_distance, reward, torch.zeros_like(reward))
+        
+        # return reward
     
     def _reward_center(self):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])

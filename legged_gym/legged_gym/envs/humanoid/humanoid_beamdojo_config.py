@@ -75,7 +75,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         use_double_critic = True
         use_forward_goals = True
         
-        next_goal_threshold = 0.3
+        next_goal_threshold = 0.5
         reach_goal_delay = 0.1
         num_future_goal_obs = 2
         
@@ -90,6 +90,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # 目标到达模式参数
         success_threshold = 3  # 连续成功次数阈值
         failure_threshold = 2  # 连续失败次数阈值
+        
+        # next_goal_threshold 课程学习参数
+        next_goal_threshold_curriculum = True  # 是否启用 next_goal_threshold 课程学习
+        next_goal_threshold_init = 0.5  # 初始阈值
+        next_goal_threshold_target = 0.2  # 目标阈值
+        next_goal_threshold_step = 0.01  # 每次成功时降低的步长
+        next_goal_threshold_success_rate = 0.7  # 成功率阈值，超过此值才降低阈值
          
         # 存活时间模式参数
         survival_time_threshold = 35.0  # 存活时间阈值（秒）
@@ -268,7 +275,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
             orientation = -1.5 
-            action_rate = -0.01
+            action_rate = -0.01 #-0.01
             
             tracking_base_height = 2.
             deviation_hip_joint = -0.2
@@ -282,7 +289,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
             feet_parallel = -3.0
-            smoothness = -0.05
+            smoothness = -0.05 #-0.05
             joint_power = -2e-5
             feet_stumble = -1.5
             torques = -2.5e-6
@@ -297,7 +304,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still = -0.15
             
             # foothold = 0.05
-            goal_reached = 1.0 
+            goal_reached = 10.0 
             
         only_positive_rewards = False
         tracking_sigma = 0.25
