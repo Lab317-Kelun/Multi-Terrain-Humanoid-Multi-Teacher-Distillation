@@ -80,11 +80,11 @@ class MuJoCoDeployNN(nn.Module):
 
 def main(args):    
     # humanoid_beamdojo 配置（来自 humanoid_beamdojo_config.py）
-    n_proprio = 75
+    n_proprio = 45  # 修改！只包含下半身：3(cmd)+3(ang_vel)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action)=45
     n_priv_explicit = 3
     n_priv_latent = 4 + 1 + 12 + 12  # 29
     num_scan = 225
-    num_actions = 27
+    num_actions = 12  # 修改！上肢已固定，策略只输出12维（腿部）
     history_len = 10
     actor_hidden_dims = [1024, 512, 256, 128]
     scan_encoder_dims = [128, 64, 32]

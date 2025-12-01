@@ -648,9 +648,9 @@ class HumanoidRobot(BaseTask):
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
                             noisy_gravity,           # R^3 (带噪声的重力)
-                            noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
-                            noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
-                            self.action_history_buf[:, -1, :12], # R^{12}
+                            noisy_dof_pos,   # R^{12} - 修改！只使用下半身（前12个关节）位置
+                            noisy_dof_vel,   # R^{12} - 修改！只使用下半身（前12个关节）速度
+                            self.action_history_buf[:, -1, :], # R^{12}
                             # phase_obs,               # R^2 (sin_phase, cos_phase) - 步态相位信息
                             # self.contact_filt.float(), # 2 接触信息
                             ), dim=-1)
@@ -1253,9 +1253,8 @@ class HumanoidRobot(BaseTask):
         print(f"Action min: {self.action_min}")
         print(f"Action max: {self.action_max}")
         
-        self.random_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
-        self.current_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
-        self.delta_upper_actions = torch.zeros((self.num_envs, 1), device=self.device)
+        # 上肢已固定合并，移除上肢动作相关变量
+        # self.random_upper_actions, self.current_upper_actions, self.delta_upper_actions 已删除
         self.joint_injection = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.actuation_offset = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         
@@ -1445,9 +1444,9 @@ class HumanoidRobot(BaseTask):
         if self.cfg.domain_rand.randomize_body_displacement:
             self.body_displacement = torch_rand_float(self.cfg.domain_rand.body_displacement_range[0], self.cfg.domain_rand.body_displacement_range[1], (self.num_envs, 3), device=self.device)
         
-        self.torso_body_index = self.body_names.index("torso_link")
-        self.left_hand_index = self.body_names.index("left_hand_palm_link")
-        self.right_hand_index = self.body_names.index("right_hand_palm_link")   
+        # self.torso_body_index = self.body_names.index("torso_link")
+        # self.left_hand_index = self.body_names.index("left_hand_palm_link")
+        # self.right_hand_index = self.body_names.index("right_hand_palm_link")   
         
         self.mass_params_tensor = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
  
@@ -1467,10 +1466,12 @@ class HumanoidRobot(BaseTask):
             actor_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, self.cfg.asset.name, i, self.cfg.asset.self_collisions, 0)
             dof_props = self._process_dof_props(dof_props_asset, i)
             
-            dof_props["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
-            dof_props["stiffness"][12:] = [300., 200., 200., 200., 100.,  20.,  20.,  20., 200., 200., 200., 100.,  20.,  20.,  20.]
-            dof_props["damping"][12:] = [5.0000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000,
-                                            0.5000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000, 0.5000]
+            # 上肢关节已通过URDF的type="fixed"固定并合并，无需设置PD增益
+            # （collapse_fixed_joints=True 会自动合并fixed关节，DOF只剩下12个腿部关节）
+            # dof_props["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
+            # dof_props["stiffness"][12:] = [300., 200., 200., 200., 100.,  20.,  20.,  20., 200., 200., 200., 100.,  20.,  20.,  20.]
+            # dof_props["damping"][12:] = [5.0000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000,
+            #                                 0.5000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000, 0.5000]
         
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
@@ -2103,13 +2104,13 @@ class HumanoidRobot(BaseTask):
     #     return torch.sum(torch.abs((joint_deviation-0.5) * height_error.unsqueeze(-1)), dim=-1)
 
     def _reward_dof_acc(self):
-        # Penalize dof accelerations
+        # Penalize dof accelerations (上肢已合并，dof_vel只有12维)
         return torch.sum(torch.square((self.last_dof_vel - self.dof_vel) / self.dt), dim=1)
     
     def _reward_dof_pos_limits(self):
-        # Penalize dof positions too close to the limit
-        out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0])[:, :self.num_actions].clip(max=0.) # lower limit
-        out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1])[:, :self.num_actions].clip(min=0.)
+        # Penalize dof positions too close to the limit (上肢已合并，dof_pos只有12维，无需切片)
+        out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0]).clip(max=0.) # lower limit
+        out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1]).clip(min=0.)
         return torch.sum(out_of_limits, dim=1)
     
     def _reward_feet_air_time(self):
@@ -2163,7 +2164,7 @@ class HumanoidRobot(BaseTask):
         return torch.sum(torch.square(self.actions - self.last_actions - self.last_actions + self.last_last_actions), dim=1)
     
     def _reward_joint_power(self):
-        #Penalize high power
+        # Penalize high power (上肢已合并，dof_vel和torques只有12维)
         return torch.sum(torch.abs(self.dof_vel) * torch.abs(self.torques), dim=1) / torch.clip(torch.sum(torch.square(self.commands[:, 0:2]), dim=-1) + 0.2 * torch.square(self.commands[:, 2]), min=0.1)
 
     def _reward_feet_stumble(self):
@@ -2171,23 +2172,22 @@ class HumanoidRobot(BaseTask):
         return torch.any(torch.norm(self.contact_forces[:, self.feet_indices, :2], dim=2) > 3 * torch.abs(self.contact_forces[:, self.feet_indices, 2]), dim=1)
         
     def _reward_torques(self):
-        # Penalize torques
-        # 修复：p_gains已经是[num_envs, num_dof]，不需要unsqueeze
-        torques_normalized = (self.torques / self.p_gains)[:, :self.num_lower_dof]
+        # Penalize torques (上肢已合并，torques和p_gains只有12维，无需切片)
+        torques_normalized = self.torques / self.p_gains
         return torch.sum(torch.square(torques_normalized), dim=1)
 
     def _reward_dof_vel(self):
-        # Penalize dof velocities
-        return torch.sum(torch.square(self.dof_vel[:, :self.num_lower_dof]), dim=1)
+        # Penalize dof velocities (上肢已合并，dof_vel只有12维，无需切片)
+        return torch.sum(torch.square(self.dof_vel), dim=1)
     
     def _reward_dof_vel_limits(self):
-        # Penalize dof velocities too close to the limit
+        # Penalize dof velocities too close to the limit (上肢已合并，无需切片)
         # clip to max error = 1 rad/s per joint to avoid huge penalties
-        return torch.sum((torch.abs(self.dof_vel) - self.dof_vel_limits*self.cfg.rewards.soft_dof_vel_limit)[:, :self.num_lower_dof].clip(min=0.), dim=1)
+        return torch.sum((torch.abs(self.dof_vel) - self.dof_vel_limits*self.cfg.rewards.soft_dof_vel_limit).clip(min=0.), dim=1)
 
     def _reward_torque_limits(self):
-        # penalize torques too close to the limit
-        return torch.sum((torch.abs(self.torques) - self.torque_limits*self.cfg.rewards.soft_torque_limit)[:, :self.num_lower_dof].clip(min=0.), dim=1)
+        # penalize torques too close to the limit (上肢已合并，无需切片)
+        return torch.sum((torch.abs(self.torques) - self.torque_limits*self.cfg.rewards.soft_torque_limit).clip(min=0.), dim=1)
     
     def _reward_no_fly(self):
         contacts = self.contact_forces[:, self.feet_indices, 2] > 0.5
@@ -2214,8 +2214,9 @@ class HumanoidRobot(BaseTask):
         return torch.sum(feet_contact_momentum_z, dim=1)
     
     def _reward_action_vanish(self):
-        upper_error = torch.clip(self.origin_actions[:, :self.num_lower_dof] - self.action_max[:, :self.num_lower_dof], min=0)
-        lower_error = torch.clip(self.action_min[:, :self.num_lower_dof] - self.origin_actions[:, :self.num_lower_dof], min=0)
+        # 上肢已合并，origin_actions/action_max/action_min只有12维，无需切片
+        upper_error = torch.clip(self.origin_actions - self.action_max, min=0)
+        lower_error = torch.clip(self.action_min - self.origin_actions, min=0)
         return torch.sum(upper_error + lower_error, dim=-1)
     
     def _reward_stand_still(self):

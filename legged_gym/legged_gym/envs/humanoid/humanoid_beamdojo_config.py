@@ -55,13 +55,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
 
     class env(LeggedRobotCfg.env):
         num_envs = 2048
-        num_dofs = 27     # 机器人总自由度：全身27个关节
+        num_dofs = 12     # 机器人总自由度：全身27个关节
         episode_length_s = 20.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 75  # 实际obs_buf维度：3(commands)+3(ang_vel)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=75
+        n_proprio = 45  # 修改！只包含下半身：3(cmd)+3(ang_vel)+3(gravity)+12(dof_pos下半身)+12(dof_vel下半身)+12(action)=45
         history_len = 10
         
         # 重新计算总观测维度
@@ -192,10 +192,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         push_robots = use_random
         push_interval_s = 4
-        upper_interval_s = 1
+        upper_interval_s = 1  # 保留（虽然上肢已固定，但某些代码可能引用）
         max_push_vel_xy = 0.5
         
-        init_upper_ratio = 0.
+        init_upper_ratio = 0.  # 保留（代码中被引用）
         delay = use_random
         
         randomize_start_pos = False    # 是否随机化起始位置
@@ -226,7 +226,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         upper_body_link = "torso_link"
         imu_link = "imu_in_pelvis"
         knee_names = ["left_knee_link", "left_hip_yaw_link", "right_knee_link", "right_hip_yaw_link"]
-        self_collision = 1
+        self_collision = 1  # 0 to enable self-collisions
+        collapse_fixed_joints = True  # 合并fixed关节（上肢已改为fixed）
         flip_visual_attachments = False
         ankle_sole_distance = 0.02
 
