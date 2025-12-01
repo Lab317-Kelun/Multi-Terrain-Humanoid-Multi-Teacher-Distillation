@@ -247,9 +247,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
             lin_vel_x = [-0.8, 1.5] # min max [m/s]
-            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
-            ang_vel_yaw = [-0.8, 0.8]    # min max [rad/s]
-            heading = [-1.2, 1.2]
+            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
+            ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
+            heading = [0.0, 0.0]
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -267,7 +267,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             orientation = -1.5 
             action_rate = -0.01
             
-            tracking_base_height = 2.
+            # tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -321,7 +321,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             # "next_heading_tracking", 
             # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            "tracking_base_height", "deviation_hip_joint", "deviation_ankle_joint", 
+            # "tracking_base_height",
+            "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",

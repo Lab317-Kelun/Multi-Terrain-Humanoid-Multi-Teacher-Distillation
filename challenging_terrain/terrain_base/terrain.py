@@ -94,10 +94,9 @@ class Terrain:
          
     def add_roughness(self, terrain, difficulty=1):
         # 根据难度计算粗糙度高度
-        # difficulty=0时：height=0.02, difficulty=1时：height=0.04
         max_height = self.cfg.height[0] + (self.cfg.height[1] - self.cfg.height[0]) * difficulty
         # 使用对称范围 [-height, height] 产生起伏
-        height = random.uniform(self.cfg.height[0], max_height)
+        # height = random.uniform(self.cfg.height[0], max_height)
         terrain_utils.random_uniform_terrain(terrain, min_height=self.cfg.height[0], max_height=max_height, step=0.005, downsampled_scale=self.cfg.downsampled_scale)
 
     def make_terrain(self,difficulty):

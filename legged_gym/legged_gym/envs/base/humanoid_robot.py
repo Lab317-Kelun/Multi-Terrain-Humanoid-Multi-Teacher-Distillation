@@ -671,7 +671,7 @@ class HumanoidRobot(BaseTask):
         ), dim=-1)
         
         # 地形ID的onehot编码
-        self.terrain_onehot[:, 0] = 1.0  # 平地 -> [0,0,0]
+        self.terrain_onehot[:, 1] = 1.0  # 平地 -> [0,0,0] GAP -> [0,1,0]
         # print(f"self.terrain_onehot: {self.terrain_onehot}")
         
         if self.cfg.terrain.measure_heights:
@@ -978,10 +978,10 @@ class HumanoidRobot(BaseTask):
                 (len(env_ids), 1), device=self.device
             ).squeeze(1)
 
-        small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
-        self.commands[env_ids, 2] = torch.where(small_command_mask, 
-                                                torch.zeros_like(self.commands[env_ids, 2]), 
-                                                self.commands[env_ids, 2])
+            small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
+            self.commands[env_ids, 2] = torch.where(small_command_mask, 
+                                                    torch.zeros_like(self.commands[env_ids, 2]), 
+                                                    self.commands[env_ids, 2])
 
         small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
@@ -1704,9 +1704,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing
+            y_start = - num_y / 2 * spacing + 21
             x_end = -x_start + 0.08
-            y_end = -y_start
+            y_end = -y_start + 42
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
             y_samples = torch.linspace(y_start, y_end, num_y, device=self.device)
@@ -2282,9 +2282,9 @@ class HumanoidRobot(BaseTask):
             spacing = 0.01  # 采样间距 0.01m
             # 计算采样范围（确保中心对称）
             x_start = - num_x / 2 * spacing + 0.01
-            y_start = - num_y / 2 * spacing
+            y_start = - num_y / 2 * spacing + 21
             x_end = -x_start + 0.08
-            y_end = -y_start
+            y_end = -y_start + 42
             
 
             x_samples = torch.linspace(x_start, x_end, num_x, device=self.device)
