@@ -105,7 +105,7 @@ def compute_proprioceptive_obs(d, config, action, cmd):
     return proprio_obs
 
 def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf):
-    # 本体感受观测（75维）
+    # 本体感受观测（45维）- 上肢已固定
     proprio_obs = compute_proprioceptive_obs(d, config, action, cmd)
     
     # 高度观测（225维）：heights = base_height - measured_heights
@@ -120,8 +120,11 @@ def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_hi
     priv_explicit = np.zeros(3, dtype=np.float32)
     priv_latent = np.zeros(29, dtype=np.float32)
     
-    # 拼接：proprio(75) + heights(225) + priv_explicit(3) + priv_latent(29) + history(750)
-    full_obs = np.concatenate([proprio_obs, heights, priv_explicit, priv_latent, obs_history_buf.flatten()]).astype(np.float32)
+    # Terrain onehot（3维）- 部署时设为平地 [1, 0, 0]
+    terrain_onehot = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    
+    # 拼接：proprio(45) + heights(225) + priv_explicit(3) + priv_latent(29) + terrain_onehot(3) + history(450)
+    full_obs = np.concatenate([proprio_obs, heights, priv_explicit, priv_latent, terrain_onehot, obs_history_buf.flatten()]).astype(np.float32)
     
     return full_obs, proprio_obs
 
@@ -160,17 +163,20 @@ def main():
     target_dof_pos = config['default_angles'].copy()
     cmd = config['cmd_init'].copy()
     obs_history_len = config['obs_history_len']
-    obs_history_buf = np.zeros((obs_history_len, 75), dtype=np.float32)
+    n_proprio = 45  # 上肢固定后，本体感觉观测降为45维
+    n_terrain_onehot = 3  # terrain onehot 编码维度
+    obs_history_buf = np.zeros((obs_history_len, n_proprio), dtype=np.float32)
     
     # 计算总观测维度
-    total_obs_dim = 75 + num_scan + 3 + 29 + obs_history_len * 75
+    total_obs_dim = n_proprio + num_scan + 3 + 29 + n_terrain_onehot + obs_history_len * n_proprio
     print(f"\n{'='*60}")
     print("观测维度配置:")
-    print(f"  本体感受观测 (proprio): 75 维")
+    print(f"  本体感受观测 (proprio): {n_proprio} 维 (上肢已固定)")
     print(f"  高度扫描 (heights): {num_scan} 维")
     print(f"  特权显式 (priv_explicit): 3 维")
     print(f"  特权隐式 (priv_latent): 29 维")
-    print(f"  历史信息 (history): {obs_history_len} × 75 = {obs_history_len * 75} 维")
+    print(f"  地形编码 (terrain_onehot): {n_terrain_onehot} 维")
+    print(f"  历史信息 (history): {obs_history_len} × {n_proprio} = {obs_history_len * n_proprio} 维")
     print(f"  总观测维度 (total): {total_obs_dim} 维")
     print(f"{'='*60}\n")
     
