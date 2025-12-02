@@ -622,7 +622,7 @@ class HumanoidRobot(BaseTask):
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
+        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
         
         obs_buf = torch.cat((
                             #skill_vector, 
@@ -644,7 +644,7 @@ class HumanoidRobot(BaseTask):
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
-                            self.action_history_buf[:, -1, :12], # R^{12}
+                            self.action_history_buf[:, -1, :], # R^{12}
                             ), dim=-1)
         
         priv_explicit = self.base_lin_vel * self.obs_scales.lin_vel
@@ -1198,9 +1198,9 @@ class HumanoidRobot(BaseTask):
         print(f"Action min: {self.action_min}")
         print(f"Action max: {self.action_max}")
         
-        self.random_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
-        self.current_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
-        self.delta_upper_actions = torch.zeros((self.num_envs, 1), device=self.device)
+        # self.random_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
+        # self.current_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
+        # self.delta_upper_actions = torch.zeros((self.num_envs, 1), device=self.device)
         self.joint_injection = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.actuation_offset = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         
@@ -1390,9 +1390,9 @@ class HumanoidRobot(BaseTask):
         if self.cfg.domain_rand.randomize_body_displacement:
             self.body_displacement = torch_rand_float(self.cfg.domain_rand.body_displacement_range[0], self.cfg.domain_rand.body_displacement_range[1], (self.num_envs, 3), device=self.device)
         
-        self.torso_body_index = self.body_names.index("torso_link")
-        self.left_hand_index = self.body_names.index("left_hand_palm_link")
-        self.right_hand_index = self.body_names.index("right_hand_palm_link")   
+        # self.torso_body_index = self.body_names.index("torso_link")
+        # self.left_hand_index = self.body_names.index("left_hand_palm_link")
+        # self.right_hand_index = self.body_names.index("right_hand_palm_link")   
         
         self.mass_params_tensor = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
  
@@ -1412,10 +1412,10 @@ class HumanoidRobot(BaseTask):
             actor_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, self.cfg.asset.name, i, self.cfg.asset.self_collisions, 0)
             dof_props = self._process_dof_props(dof_props_asset, i)
             
-            dof_props["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
-            dof_props["stiffness"][12:] = [300., 200., 200., 200., 100.,  20.,  20.,  20., 200., 200., 200., 100.,  20.,  20.,  20.]
-            dof_props["damping"][12:] = [5.0000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000,
-                                            0.5000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000, 0.5000]
+            # dof_props["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
+            # dof_props["stiffness"][12:] = [300., 200., 200., 200., 100.,  20.,  20.,  20., 200., 200., 200., 100.,  20.,  20.,  20.]
+            # dof_props["damping"][12:] = [5.0000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000,
+            #                                 0.5000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000, 0.5000]
         
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
