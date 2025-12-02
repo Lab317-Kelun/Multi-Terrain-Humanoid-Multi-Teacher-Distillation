@@ -819,9 +819,7 @@ class HumanoidRobot(BaseTask):
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
 
         if self.cfg.commands.heading_command:
-            forward = quat_apply(self.base_quat, self.forward_vec)
-            heading = torch.atan2(forward[:, 1], forward[:, 0])
-            heading_error = wrap_to_pi(self.commands[:, 3] - heading)
+            heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
             # 使用PD控制器计算角速度命令，避免死区导致的跳跃
             ang_vel_cmd = 0.8 * heading_error
             # 应用死区：小于阈值的命令设为0，但保持连续性
@@ -1919,7 +1917,7 @@ class HumanoidRobot(BaseTask):
         # 5.1 垂直偏移：系统性高度误差（所有点统一偏移）
         heights += vertical_offset[env_slice]
         
-        # 5.2 垂直噪声：每个采样点独立的测量抖动
+        # 5.2 垂直噪声：每个采样点独立的heading_command测量抖动
         heights += vertical_noise[env_slice]
         
         # 5.3 Roll/Pitch倾斜噪声：模拟地图在俯仰、滚转方向的旋转误差
