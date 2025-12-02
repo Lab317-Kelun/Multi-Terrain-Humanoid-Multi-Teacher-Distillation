@@ -40,7 +40,10 @@ class HardwareVisionNN(nn.Module):
                         scan_encoder_dims=[128, 64, 32],
                         depth_encoder_hidden_dim=512,
                         activation='elu',
-                        priv_encoder_dims=[64, 20]
+                        priv_encoder_dims=[64, 20],
+                        terrain_onehot_encoder_dims=[16, 8],
+                        terrain_onehot_history_encoder_dims=[128, 64, 32],
+                        n_terrain_onehot=3
                         ):
         super(HardwareVisionNN, self).__init__()
         
@@ -50,11 +53,17 @@ class HardwareVisionNN(nn.Module):
         self.num_actions = num_actions
         self.num_priv_latent = num_priv_latent
         self.num_priv_explicit = num_priv_explicit
-        num_obs = num_prop + num_scan + num_priv_explicit + num_priv_latent + num_hist*num_prop
+        self.n_terrain_onehot = n_terrain_onehot
+        num_obs = num_prop + num_scan + num_priv_explicit + num_priv_latent + n_terrain_onehot + num_hist*num_prop
         self.num_obs = num_obs
         activation = get_activation(activation)
         
-        self.actor = Actor(num_prop, num_scan, num_actions, scan_encoder_dims, actor_hidden_dims, priv_encoder_dims, num_priv_latent, num_priv_explicit, num_hist, activation, tanh_encoder_output=tanh)
+        self.actor = Actor(
+            num_prop, num_scan, num_actions, scan_encoder_dims, actor_hidden_dims, priv_encoder_dims, 
+            terrain_onehot_encoder_dims, num_priv_latent, num_priv_explicit, num_hist, activation, 
+            tanh_encoder_output=tanh, n_terrain_onehot=n_terrain_onehot,
+            terrain_onehot_history_encoder_dims=terrain_onehot_history_encoder_dims
+        )
 
         # Estimator 使用历史观测的拼接作为输入: history_len * num_prop
         self.estimator = Estimator(input_dim=num_hist * num_prop, output_dim=num_priv_explicit, hidden_dims=[256, 128, 64])
@@ -80,16 +89,19 @@ class MuJoCoDeployNN(nn.Module):
 
 def main(args):    
     # humanoid_beamdojo 配置（来自 humanoid_beamdojo_config.py）
-    # 本体感受观测维度（只包含下肢12个关节）：commands(3) + ang_vel(3) + gravity(3) + dof_pos(12) + dof_vel(12) + action_history(12) = 45
-    n_proprio = 45
-    n_priv_explicit = 3  # base_lin_vel (x, y, z)
-    n_priv_latent = 4 + 1 + 12 + 12  # 质量参数(4) + 摩擦系数(1) + 电机强度(12+12) = 29
-    num_scan = 225  # 15×15 高度扫描点
-    num_actions = 12  # 只控制下肢12个关节（上肢已固定）
-    history_len = 10  # 历史长度
+    n_proprio = 45  # 上肢固定后：3(cmd)+3(ang_vel)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action)=45
+    n_priv_explicit = 3
+    n_priv_latent = 4 + 1 + 12 + 12  # 29
+    num_scan = 225
+    num_actions = 12  # 上肢已固定，策略只输出12维（腿部）
+    history_len = 10
+    n_terrain_onehot = 3  # 地形ID的onehot编码维度
+    
     actor_hidden_dims = [1024, 512, 256, 128]
     scan_encoder_dims = [128, 64, 32]
     priv_encoder_dims = [64, 20]
+    terrain_onehot_encoder_dims = [16, 8]
+    terrain_onehot_history_encoder_dims = [128, 64, 32]  # 使用本体观测+高度图CNN特征预测terrain onehot
     activation = 'elu'
     tanh_encoder_output = False
 
@@ -105,6 +117,9 @@ def main(args):
         actor_hidden_dims=actor_hidden_dims,
         scan_encoder_dims=scan_encoder_dims,
         priv_encoder_dims=priv_encoder_dims,
+        terrain_onehot_encoder_dims=terrain_onehot_encoder_dims,
+        terrain_onehot_history_encoder_dims=terrain_onehot_history_encoder_dims,
+        n_terrain_onehot=n_terrain_onehot,
         activation=activation
     ).to(device)
     ac_state_dict = torch.load(load_path, map_location=device)
@@ -115,7 +130,9 @@ def main(args):
     deploy_policy = MuJoCoDeployNN(policy).eval()
     
     with torch.no_grad(): 
-        obs_input = torch.ones(1, n_proprio + num_scan + n_priv_explicit + n_priv_latent + history_len*n_proprio, device=device)
+        # 观测维度：n_proprio + num_scan + n_priv_explicit + n_priv_latent + n_terrain_onehot + history_len*n_proprio
+        total_obs_dim = n_proprio + num_scan + n_priv_explicit + n_priv_latent + n_terrain_onehot + history_len*n_proprio
+        obs_input = torch.ones(1, total_obs_dim, device=device)
         traced_policy = torch.jit.trace(deploy_policy, obs_input)
         save_path = os.path.join(load_run, "traced", args.exptid + "-" + str(checkpoint) + "-mujoco_jit.pt")
         traced_policy.save(save_path)
