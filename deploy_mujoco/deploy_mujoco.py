@@ -28,9 +28,7 @@ def load_config(config_path):
     config.setdefault('lidar_mode', 'terrain')
     config.setdefault('measure_heights', True)
     config.setdefault('obs_history_len', 10)
-    config.setdefault('print_period', 100)
-    config.setdefault('upper_body_kps', 300.0)  # 上肢关节PD位置增益（用于固定到0）
-    config.setdefault('upper_body_kds', 5.0)     # 上肢关节PD速度增益（用于固定到0） 
+    config.setdefault('print_period', 100) 
     
     return config
 
@@ -83,58 +81,31 @@ def get_scan_from_terrain(m, d, scan_points_body):
     return terrain_heights
 
 def compute_proprioceptive_obs(d, config, action, cmd):
-    """
-    计算本体感受观测（45维，只包含下肢12个关节）
-    结构：commands(3) + ang_vel(3) + gravity(3) + dof_pos(12) + dof_vel(12) + action_history(12) = 45
-    """
-    num_actions = config['num_actions']  # 12个下肢关节
-    # 只使用前12个关节（下肢）
-    qj = d.qpos[7:7+num_actions]  # 只取前12个关节
-    dqj = d.qvel[6:6+num_actions]  # 只取前12个关节
+    n_joints = d.qpos.shape[0] - 7
+    qj = d.qpos[7:7+n_joints]
+    dqj = d.qvel[6:6+n_joints]
     omega = d.qvel[3:6]
     quat = d.qpos[3:7]
     
-    default_angles = config['default_angles']  # 应该已经是12个
+    default_angles = config['default_angles']
+    if len(default_angles) < n_joints:
+        padded_defaults = np.zeros(n_joints, dtype=np.float32)
+        padded_defaults[:len(default_angles)] = default_angles
+    else:
+        padded_defaults = default_angles[:n_joints]
     
-    # 构建45维观测
-    proprio_obs = np.zeros(45, dtype=np.float32)
-    idx = 0
-    
-    # commands (3): [vx, vy, vyaw]
-    proprio_obs[idx:idx+3] = cmd[:3] * config['cmd_scale']
-    idx += 3
-    
-    # ang_vel (3)
-    proprio_obs[idx:idx+3] = omega * config['ang_vel_scale']
-    idx += 3
-    
-    # gravity (3)
-    proprio_obs[idx:idx+3] = get_gravity_orientation(quat)
-    idx += 3
-    
-    # dof_pos (12): 只使用下肢12个关节
-    proprio_obs[idx:idx+num_actions] = (qj - default_angles) * config['dof_pos_scale']
-    idx += num_actions
-    
-    # dof_vel (12): 只使用下肢12个关节
-    proprio_obs[idx:idx+num_actions] = dqj * config['dof_vel_scale']
-    idx += num_actions
-    
-    # action_history (12): 只保存下半身12个关节的动作
-    proprio_obs[idx:idx+num_actions] = action[:num_actions]
-    idx += num_actions
-    
-    assert idx == 45, f"观测维度错误：期望45，实际{idx}"
+    proprio_obs = np.zeros(75, dtype=np.float32)
+    proprio_obs[0:3] = cmd[:3] * config['cmd_scale']
+    proprio_obs[3:6] = omega * config['ang_vel_scale']
+    proprio_obs[6:9] = get_gravity_orientation(quat)
+    proprio_obs[9:9+n_joints] = (qj - padded_defaults) * config['dof_pos_scale']
+    proprio_obs[9+n_joints:9+2*n_joints] = dqj * config['dof_vel_scale']
+    proprio_obs[9+2*n_joints:9+2*n_joints+12] = action[:12]  # 修复：使用正确的结束索引
     
     return proprio_obs
 
 def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf):
-    """
-    计算完整观测
-    结构：proprio(45) + heights(225) + priv_explicit(3) + priv_latent(29) + history(450)
-    总维度：45 + 225 + 3 + 29 + 450 = 752
-    """
-    # 本体感受观测（45维，只包含下肢12个关节）
+    # 本体感受观测（45维）- 上肢已固定
     proprio_obs = compute_proprioceptive_obs(d, config, action, cmd)
     
     # 高度观测（225维）：heights = base_height - measured_heights
@@ -146,13 +117,14 @@ def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_hi
         heights = np.zeros(num_scan, dtype=np.float32)
     
     # 特权信息（推理时设为0）
-    priv_explicit = np.zeros(3, dtype=np.float32)  # base_lin_vel
-    priv_latent = np.zeros(29, dtype=np.float32)   # 质量参数等
+    priv_explicit = np.zeros(3, dtype=np.float32)
+    priv_latent = np.zeros(29, dtype=np.float32)
     
-    # 拼接：proprio(45) + heights(225) + priv_explicit(3) + priv_latent(29) + history(450)
-    full_obs = np.concatenate([proprio_obs, heights, priv_explicit, priv_latent, obs_history_buf.flatten()]).astype(np.float32)
+    # Terrain onehot（3维）- 部署时设为平地 [1, 0, 0]
+    terrain_onehot = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     
-    assert full_obs.shape[0] == 45 + 225 + 3 + 29 + 450, f"观测维度错误：期望752，实际{full_obs.shape[0]}"
+    # 拼接：proprio(45) + heights(225) + priv_explicit(3) + priv_latent(29) + terrain_onehot(3) + history(450)
+    full_obs = np.concatenate([proprio_obs, heights, priv_explicit, priv_latent, terrain_onehot, obs_history_buf.flatten()]).astype(np.float32)
     
     return full_obs, proprio_obs
 
@@ -164,15 +136,12 @@ def main():
     d = mujoco.MjData(m)
     m.opt.timestep = config['simulation_dt']
     
-    n_joints = d.qpos.shape[0] - 7  # 总关节数（可能包含上肢）
-    num_actions = config['num_actions']  # 只控制下肢12个关节
-    num_upper_joints = n_joints - num_actions if n_joints > num_actions else 0
+    n_joints = d.qpos.shape[0] - 7
+    num_actions = config['num_actions']
     print(f"\n{'='*60}")
     print("机器人初始化信息:")
-    print(f"  总关节数量: {n_joints}")
-    print(f"  动作维度: {num_actions} (策略控制下肢12个关节)")
-    if num_upper_joints > 0:
-        print(f"  上肢关节: {num_upper_joints} 个 (通过PD控制固定在0位置，不由策略控制)")
+    print(f"  关节数量: {n_joints}")
+    print(f"  动作维度: {num_actions}")
     print(f"  仿真时间步长: {config['simulation_dt']} s ({1/config['simulation_dt']:.0f} Hz)")
     print(f"  控制降采样率: {config['control_decimation']}")
     print(f"  控制频率: {1/config['simulation_dt']/config['control_decimation']:.0f} Hz")
@@ -194,19 +163,20 @@ def main():
     target_dof_pos = config['default_angles'].copy()
     cmd = config['cmd_init'].copy()
     obs_history_len = config['obs_history_len']
-    obs_history_buf = np.zeros((obs_history_len, 45), dtype=np.float32)  # 45维（只包含下肢12个关节）
+    n_proprio = 45  # 上肢固定后，本体感觉观测降为45维
+    n_terrain_onehot = 3  # terrain onehot 编码维度
+    obs_history_buf = np.zeros((obs_history_len, n_proprio), dtype=np.float32)
     
     # 计算总观测维度
-    total_obs_dim = 45 + num_scan + 3 + 29 + obs_history_len * 45
+    total_obs_dim = n_proprio + num_scan + 3 + 29 + n_terrain_onehot + obs_history_len * n_proprio
     print(f"\n{'='*60}")
     print("观测维度配置:")
-    print(f"  本体感受观测 (proprio): 45 维（只包含下肢12个关节）")
-    print(f"    - commands: 3, ang_vel: 3, gravity: 3")
-    print(f"    - dof_pos: 12, dof_vel: 12, action_history: 12")
+    print(f"  本体感受观测 (proprio): {n_proprio} 维 (上肢已固定)")
     print(f"  高度扫描 (heights): {num_scan} 维")
     print(f"  特权显式 (priv_explicit): 3 维")
     print(f"  特权隐式 (priv_latent): 29 维")
-    print(f"  历史信息 (history): {obs_history_len} × 45 = {obs_history_len * 45} 维")
+    print(f"  地形编码 (terrain_onehot): {n_terrain_onehot} 维")
+    print(f"  历史信息 (history): {obs_history_len} × {n_proprio} = {obs_history_len * n_proprio} 维")
     print(f"  总观测维度 (total): {total_obs_dim} 维")
     print(f"{'='*60}\n")
     
@@ -225,7 +195,7 @@ def main():
         while viewer.is_running() and time.time() - start < config['simulation_duration']:
             step_start = time.time()
             
-            # PD控制腿部关节（只控制下肢12个关节，由策略控制）
+            # PD控制腿部关节
             leg_tau = pd_control(
                 target_dof_pos,
                 d.qpos[7:7+num_actions],
@@ -236,24 +206,18 @@ def main():
             )
             d.ctrl[:num_actions] = leg_tau
             
-            # 固定上肢关节到默认位置（0），通过PD控制固定，不由策略控制
+            # 控制其他关节
             if n_joints > num_actions:
-                num_upper_joints = n_joints - num_actions
-                # 上肢目标位置为0（固定在原点）
-                upper_target_pos = np.zeros(num_upper_joints, dtype=np.float32)
-                upper_current_pos = d.qpos[7+num_actions:7+n_joints]
-                upper_current_vel = d.qvel[6+num_actions:6+n_joints]
-                
-                # PD控制固定上肢到0位置
-                upper_tau = pd_control(
-                    upper_target_pos,
-                    upper_current_pos,
-                    np.full(num_upper_joints, config['upper_body_kps']),
-                    np.zeros(num_upper_joints),
-                    upper_current_vel,
-                    np.full(num_upper_joints, config['upper_body_kds'])
+                arm_tau = pd_control(
+                    np.zeros(n_joints - num_actions),
+                    d.qpos[7+num_actions:7+n_joints],
+                    np.full(n_joints-num_actions, 100.0),
+                    np.zeros(n_joints-num_actions),
+                    d.qvel[6+num_actions:6+n_joints],
+                    np.full(n_joints-num_actions, 0.5)
                 )
-                d.ctrl[num_actions:num_actions+num_upper_joints] = upper_tau
+                if d.ctrl.shape[0] > num_actions:
+                    d.ctrl[num_actions:] = arm_tau
             
             mujoco.mj_step(m, d)
             
@@ -279,11 +243,11 @@ def main():
                     print(f"控制周期 #{control_counter}")
                     print(f"{'='*60}")
                     print(f"\n输入观测 (维度: {full_obs.shape[0]}):")
-                    print(f"  本体感受观测 (proprio, 0-44): {full_obs[0:45]}")
-                    print(f"  高度扫描 (heights, 45-269): {full_obs[45:45+num_scan]}")
-                    print(f"  特权显式 (priv_explicit, 270-272): {full_obs[45+num_scan:45+num_scan+3]}")
-                    print(f"  特权隐式 (priv_latent, 273-301): {full_obs[45+num_scan+3:45+num_scan+3+29]}")
-                    print(f"  历史信息 (history, 302-751): {full_obs[45+num_scan+3+29:]}")
+                    print(f"  本体感受观测 (proprio, 0-74): {full_obs[0:75]}")
+                    print(f"  高度扫描 (heights, 75-299): {full_obs[75:75+num_scan]}")
+                    print(f"  特权显式 (priv_explicit, 300-302): {full_obs[75+num_scan:75+num_scan+3]}")
+                    print(f"  特权隐式 (priv_latent, 303-331): {full_obs[75+num_scan+3:75+num_scan+3+29]}")
+                    print(f"  历史信息 (history, 332-1081): {full_obs[75+num_scan+3+29:]}")
                     print(f"\n输出动作 (维度: {action.shape[0]}):")
                     print(f"  {action}")
                     print(f"{'='*60}\n")
