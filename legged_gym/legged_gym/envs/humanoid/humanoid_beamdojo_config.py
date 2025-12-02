@@ -257,30 +257,26 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         class scales:
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
-            tracking_ang_vel = 2.0 #2.0
-            heading_tracking = 1.0 #2.0 3.0
-            # next_heading_tracking = 0.5 #1.5 2.0
-            # reach_goal = 2.0
-            # center = -1.0 
+            tracking_ang_vel = 2.0
+            heading_tracking = 1.0
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
             orientation = -1.5 
             action_rate = -0.01
             
-            # base_height = -10.0
             tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
             dof_acc = -2.5e-7
             dof_pos_limits = -2.
-            feet_air_time = 1.0 #0.05 1.0
-            feet_clearance = -1.0 #-0.25 -1.0
-            feet_distance_lateral = 0.5  #0.5 0.5
-            knee_distance_lateral = 1.0 #1.0 1.0
+            feet_air_time = 0.05
+            feet_clearance = -0.25
+            feet_distance_lateral = 0.5  
+            knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
-            feet_parallel = 0.0 #-3.0 0.0
+            feet_parallel = -3.0
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
@@ -289,15 +285,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_vel_limits = -2e-3
             torque_limits = -0.1
             no_fly = 0.75
-            # joint_tracking_error = -0.1
             feet_slip = -0.25
             feet_contact_forces = -0.00025
             contact_momentum = 2.5e-4
             action_vanish = -1.0
-            stand_still = -0.15   
-            # termination = -20 #-10 -20 -30
+            stand_still = -0.15
             
-            foothold = 0.05 #1.0 0.05 0.15 0.25 0.1 0.12
+            foothold = 0.05
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -306,25 +300,22 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         soft_torque_limit = 0.95
         base_height_target = 0.74
         max_contact_force = 400.
-        least_feet_distance = 0.18 #0.2 0.18
-        least_feet_distance_lateral = 0.18 #0.2 0.18
-        most_feet_distance_lateral = 0.25 #0.35 0.25
-        most_knee_distance_lateral = 0.25 #0.35 0.25
-        least_knee_distance_lateral = 0.18 #0.2 0.18
-        clearance_height_target = 0.18 #0.14 0.18
+        least_feet_distance = 0.2
+        least_feet_distance_lateral = 0.2
+        most_feet_distance_lateral = 0.35
+        most_knee_distance_lateral = 0.35
+        least_knee_distance_lateral = 0.2
+        clearance_height_target = 0.14
         is_play = False
         
-        foothold_foot_length = 0.12         # 脚长度 [m] 
-        foothold_foot_width = 0.06          # 脚宽度 [m]
-        foothold_height_tolerance = -0.1    # 高度容忍度 [m]
-        
+        foothold_foot_length = 0.12
+        foothold_foot_width = 0.06
+        foothold_height_tolerance = -0.1               
             
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
-            # "next_heading_tracking", 
-            # "reach_goal","center",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "tracking_base_height", "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
@@ -444,7 +435,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
 
     class estimator(LeggedRobotCfgPPO.estimator):
         """状态估计器配置"""
-        train_with_estimated_states = True
+        train_with_estimated_states = False
         learning_rate = 1.e-4
         hidden_dims = [256, 128, 64]
         priv_states_dim = HumanoidBEAMDOJOCfg.env.n_priv
