@@ -250,7 +250,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         curriculum = True           # 是否启用课程学习
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = False         # 启用朝向命令模式
-        ang_vel_clip = 0.05            # 角速度命令死区阈值
+        ang_vel_clip = 0.0            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
         # 策略1：智能速度生成配置
@@ -278,7 +278,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             orientation = -1.5 
             action_rate = -0.01 #-0.01
             
-            tracking_base_height = 2.
+            # tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -331,7 +331,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            "tracking_base_height", 
+            # "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
