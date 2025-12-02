@@ -1,5 +1,5 @@
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec01_21-10-57--homie_stage1_target_navigation_newobs_newrew_goalline10.0_curnew_/traced/Dec01_21-10-57--homie_stage1_target_navigation_newobs_newrew_goalline10.0_curnew_-800-mujoco_jit.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec02_22-21-36--homie_stage1_target_navigation_newobs_velTrue/traced/Dec02_22-21-36--homie_stage1_target_navigation_newobs_velTrue-800-mujoco_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 
@@ -23,14 +23,19 @@ simulation_dt: 0.002         # 仿真时间步长（秒），对应500Hz仿真�
 #   - 控制周期一致（都是0.02秒，50Hz），确保策略执行频率与训练时一致 ✓
 control_decimation: 10       # 控制降采样率（策略每10个仿真步执行一次）
 
+# PD增益：只包含下肢12个关节
 kps: [100, 100, 100, 150, 40, 40,
      100, 100, 100, 150, 40, 40]
 kds: [2.0, 2.0, 2.0, 4.0, 2.0, 2.0,
      2.0, 2.0, 2.0, 4.0, 2.0, 2.0]
 
-# Default joint angles for legs
+# Default joint angles for legs (只包含下肢12个关节)
 default_angles: [-0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
                  -0.1, 0.0, 0.0, 0.3, -0.2, 0.0]
+
+# 上肢关节PD增益（用于固定上肢到默认位置）
+upper_body_kps: 300.0  # 上肢关节位置增益
+upper_body_kds: 5.0    # 上肢关节速度增益
 
 # ========== 观测缩放配置 ==========
 lin_vel_scale: 2.0       # 线速度缩放（未使用，仅训练时）
@@ -48,3 +53,13 @@ obs_history_len: 10      # 历史长度（10步）
 
 # ========== 速度指令配置 ==========
 cmd_init: [0.5, 0, 0]   # 初始速度指令：[vx, vy, vyaw] (m/s, m/s, rad/s)
+
+# ========== 目标点配置 ==========
+# 初始目标点位置 [x, y, z] (米)，相对于世界坐标系原点
+goal_init: [2.0, 2.0, 0.78]
+# 到达目标的距离阈值（米），小于此距离认为到达目标
+goal_reach_threshold: 0.5
+# 是否启用动态目标更新（到达目标后自动生成新目标）
+goal_dynamic_update: true
+# 动态更新时，新目标在机器人前方的距离范围 [min, max] (米)
+goal_forward_distance_range: [1.5, 3.0]
