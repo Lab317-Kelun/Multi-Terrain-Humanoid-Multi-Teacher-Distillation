@@ -1,12 +1,7 @@
-# ========== 路径配置 ==========
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/zikang/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/deploy_mujoco/models/model_jit.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/deploy_mujoco/models/model_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
-# xml_path: "./resources/robots/g1_description/g1_only.xml"
-# xml_path: "./resources/robots/g1_description/gap.xml"
-# xml_path: "./resources/robots/g1_description/pit.xml"
-# xml_path: "./resources/robots/g1_description/rough.xml"
-xml_path: "./resources/robots/g1_description/stairs.xml"
+xml_path: "./resources/robots/g1_description/g1.xml"
 
 # ========== 功能开关配置 ==========
 use_lidar: true          # 是否使用雷达扫描数据
@@ -33,13 +28,9 @@ kps: [100, 100, 100, 150, 40, 40,
 kds: [2.0, 2.0, 2.0, 4.0, 2.0, 2.0,
      2.0, 2.0, 2.0, 4.0, 2.0, 2.0]
 
-# Default joint angles for legs (只包含下肢12个关节)
+# Default joint angles for legs
 default_angles: [-0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
                  -0.1, 0.0, 0.0, 0.3, -0.2, 0.0]
-
-# 上肢关节PD增益（用于固定上肢到默认位置0）
-upper_body_kps: 300.0  # 上肢关节位置增益
-upper_body_kds: 5.0    # 上肢关节速度增益
 
 # ========== 观测缩放配置 ==========
 lin_vel_scale: 2.0       # 线速度缩放（未使用，仅训练时）
