@@ -441,7 +441,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
 
     class estimator(LeggedRobotCfgPPO.estimator):
         """状态估计器配置"""
-        train_with_estimated_states = True
+        train_with_estimated_states = False
         learning_rate = 1.e-4
         hidden_dims = [256, 128, 64]
         priv_states_dim = HumanoidBEAMDOJOCfg.env.n_priv

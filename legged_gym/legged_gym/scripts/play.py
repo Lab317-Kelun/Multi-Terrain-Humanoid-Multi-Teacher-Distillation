@@ -99,28 +99,51 @@ def play(args):
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
 
-    actions = torch.zeros(env.num_envs, 19, device=env.device, requires_grad=False)
+    actions = torch.zeros(env.num_envs, env.cfg.env.num_actions, device=env.device, requires_grad=False)
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
+    # 获取观测维度信息
+    n_proprio = env.cfg.env.n_proprio
+    n_scan = env.cfg.env.n_scan
+    n_priv = env.cfg.env.n_priv
+    history_len = env.cfg.env.history_len
+    n_terrain_onehot = env.cfg.env.n_terrain_onehot
+    
+    # priv_explicit在观测中的位置：n_proprio + n_scan 到 n_proprio + n_scan + n_priv
+    priv_explicit_start = n_proprio + n_scan
+    priv_explicit_end = priv_explicit_start + n_priv
+    
+    # 历史观测在观测中的位置：最后 history_len * n_proprio 维
+    hist_obs_start = -history_len * n_proprio
+
     for i in range(10*int(env.max_episode_length)):
+        # 使用estimator预测线速度（priv_explicit）
+        obs_est = obs.clone()
+        # 提取历史观测（最后 history_len * n_proprio 维）
+        hist_obs = obs_est[:, hist_obs_start:]
+        # 使用estimator预测priv_explicit（base_lin_vel）
+        with torch.no_grad():
+            priv_explicit_estimated = estimator(hist_obs)
+        # 将预测的priv_explicit替换到观测中的相应位置
+        obs_est[:, priv_explicit_start:priv_explicit_end] = priv_explicit_estimated
        
         if env.cfg.depth.use_camera:
             if infos["depth"] is not None:
-                obs_student = obs[:, :env.cfg.env.n_proprio].clone()
+                obs_student = obs_est[:, :env.cfg.env.n_proprio].clone()
                 obs_student[:, 6:8] = 0
                 depth_latent_and_yaw = depth_encoder(infos["depth"], obs_student)
                 depth_latent = depth_latent_and_yaw[:, :-2]
                 yaw = depth_latent_and_yaw[:, -2:]
-            obs[:, 6:8] = 1.5*yaw
+            obs_est[:, 6:8] = 1.5*yaw
                 
         else:
             depth_latent = None
         
         if hasattr(ppo_runner.alg, "depth_actor"):
-            actions = ppo_runner.alg.depth_actor(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
+            actions = ppo_runner.alg.depth_actor(obs_est.detach(), hist_encoding=True, scandots_latent=depth_latent)
         else:
-            actions = policy(obs.detach(), hist_encoding=True, scandots_latent=depth_latent)
+            actions = policy(obs_est.detach(), hist_encoding=True, scandots_latent=depth_latent)
             
         obs, _, rews, dones, infos = env.step(actions.detach())
 
