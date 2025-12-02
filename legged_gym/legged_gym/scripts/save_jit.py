@@ -80,12 +80,13 @@ class MuJoCoDeployNN(nn.Module):
 
 def main(args):    
     # humanoid_beamdojo 配置（来自 humanoid_beamdojo_config.py）
-    n_proprio = 75
-    n_priv_explicit = 3
-    n_priv_latent = 4 + 1 + 12 + 12  # 29
-    num_scan = 225
-    num_actions = 27
-    history_len = 10
+    # 本体感受观测维度（只包含下肢12个关节）：commands(3) + ang_vel(3) + gravity(3) + dof_pos(12) + dof_vel(12) + action_history(12) = 45
+    n_proprio = 45
+    n_priv_explicit = 3  # base_lin_vel (x, y, z)
+    n_priv_latent = 4 + 1 + 12 + 12  # 质量参数(4) + 摩擦系数(1) + 电机强度(12+12) = 29
+    num_scan = 225  # 15×15 高度扫描点
+    num_actions = 12  # 只控制下肢12个关节（上肢已固定）
+    history_len = 10  # 历史长度
     actor_hidden_dims = [1024, 512, 256, 128]
     scan_encoder_dims = [128, 64, 32]
     priv_encoder_dims = [64, 20]
