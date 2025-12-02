@@ -146,8 +146,18 @@ class PPODoubleReward:
     def act(self, obs, critic_obs, info, hist_encoding=False):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
-        # Compute the actions and values
-        self.transition.actions = self.actor_critic.act(obs, hist_encoding).detach()
+        if self.train_with_estimated_states:
+            obs_est = obs.clone()
+            # 历史观测位于观测的最后 history_len * n_proprio 维
+            hist_obs = obs_est[:, -self.num_hist * self.num_prop:]
+            # 使用 estimator 估计 priv_explicit
+            priv_explicit_estimated = self.estimator(hist_obs)
+            # 将估计的 priv_explicit 替换到观测中的相应位置
+            # priv_explicit 的位置：n_proprio + n_scan 到 n_proprio + n_scan + priv_states_dim
+            obs_est[:, self.num_prop + self.num_scan : self.num_prop + self.num_scan + self.priv_states_dim] = priv_explicit_estimated
+            self.transition.actions = self.actor_critic.act(obs_est, hist_encoding).detach()
+        else:
+            self.transition.actions = self.actor_critic.act(obs, hist_encoding).detach()
         
         if self.use_double_critic:
             # 双Critic评估
