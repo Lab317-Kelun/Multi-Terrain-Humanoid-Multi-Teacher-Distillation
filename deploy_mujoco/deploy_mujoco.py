@@ -80,12 +80,42 @@ def get_scan_from_terrain(m, d, scan_points_body):
     
     return terrain_heights
 
-def compute_proprioceptive_obs(d, config, action, cmd):
+def compute_proprioceptive_obs(d, config, action, cmd, cur_goal):
+    """
+    计算本体感受观测（78维）
+    结构与legged_gym一致：
+    - commands (3): vx, vy, vyaw (scaled)
+    - ang_vel (3): 角速度 (scaled)
+    - delta_yaw (1): 朝向误差 (scaled)
+    - delta_pose_x (1): X方向位置误差 (scaled)
+    - delta_pose_y (1): Y方向位置误差 (scaled)
+    - gravity (3): 重力方向
+    - dof_pos (27): 关节位置偏移 (scaled)
+    - dof_vel (27): 关节速度 (scaled)
+    - action_history (12): 上一步动作（仅下半身12个关节）
+    """
     n_joints = d.qpos.shape[0] - 7
     qj = d.qpos[7:7+n_joints]
     dqj = d.qvel[6:6+n_joints]
     omega = d.qvel[3:6]
     quat = d.qpos[3:7]
+    base_pos = d.qpos[:3]
+    
+    # 获取yaw角（从四元数提取）
+    w, x, y, z = quat
+    yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    
+    # 计算目标朝向（目标点相对于机器人的角度）
+    target_vec = cur_goal[:2] - base_pos[:2]
+    target_yaw = np.arctan2(target_vec[1], target_vec[0])
+    
+    # 计算朝向误差（归一化到[-π, π]）
+    delta_yaw = target_yaw - yaw
+    delta_yaw = np.arctan2(np.sin(delta_yaw), np.cos(delta_yaw))
+    
+    # 计算位置误差
+    delta_pose_x = cur_goal[0] - base_pos[0]
+    delta_pose_y = cur_goal[1] - base_pos[1]
     
     default_angles = config['default_angles']
     if len(default_angles) < n_joints:
@@ -94,19 +124,58 @@ def compute_proprioceptive_obs(d, config, action, cmd):
     else:
         padded_defaults = default_angles[:n_joints]
     
-    proprio_obs = np.zeros(75, dtype=np.float32)
-    proprio_obs[0:3] = cmd[:3] * config['cmd_scale']
-    proprio_obs[3:6] = omega * config['ang_vel_scale']
-    proprio_obs[6:9] = get_gravity_orientation(quat)
-    proprio_obs[9:9+n_joints] = (qj - padded_defaults) * config['dof_pos_scale']
-    proprio_obs[9+n_joints:9+2*n_joints] = dqj * config['dof_vel_scale']
-    proprio_obs[9+2*n_joints:9+2*n_joints+12] = action[:12]  # 修复：使用正确的结束索引
+    # 构建78维观测
+    proprio_obs = np.zeros(78, dtype=np.float32)
+    idx = 0
+    
+    # commands (3): [vx, vy, vyaw]
+    proprio_obs[idx:idx+3] = cmd[:3] * config['cmd_scale']
+    idx += 3
+    
+    # ang_vel (3)
+    proprio_obs[idx:idx+3] = omega * config['ang_vel_scale']
+    idx += 3
+    
+    # delta_yaw (1)
+    proprio_obs[idx] = delta_yaw * config['delta_yaw_scale']
+    idx += 1
+    
+    # delta_pose_x (1)
+    proprio_obs[idx] = delta_pose_x * config['delta_pose_scale']
+    idx += 1
+    
+    # delta_pose_y (1)
+    proprio_obs[idx] = delta_pose_y * config['delta_pose_scale']
+    idx += 1
+    
+    # gravity (3)
+    proprio_obs[idx:idx+3] = get_gravity_orientation(quat)
+    idx += 3
+    
+    # dof_pos (27)
+    proprio_obs[idx:idx+n_joints] = (qj - padded_defaults) * config['dof_pos_scale']
+    idx += n_joints
+    
+    # dof_vel (27)
+    proprio_obs[idx:idx+n_joints] = dqj * config['dof_vel_scale']
+    idx += n_joints
+    
+    # action_history (12): 只保存下半身12个关节的动作
+    proprio_obs[idx:idx+12] = action[:12]
+    idx += 12
+    
+    assert idx == 78, f"观测维度错误：期望78，实际{idx}"
     
     return proprio_obs
 
-def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf):
-    # 本体感受观测（75维）
-    proprio_obs = compute_proprioceptive_obs(d, config, action, cmd)
+def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, cur_goal):
+    """
+    计算完整观测
+    结构：proprio(78) + heights(225) + priv_explicit(3) + priv_latent(29) + history(780)
+    总维度：78 + 225 + 3 + 29 + 780 = 1115
+    """
+    # 本体感受观测（78维）
+    proprio_obs = compute_proprioceptive_obs(d, config, action, cmd, cur_goal)
     
     # 高度观测（225维）：heights = base_height - measured_heights
     num_scan = scan_points_body.shape[0]
@@ -117,11 +186,13 @@ def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_hi
         heights = np.zeros(num_scan, dtype=np.float32)
     
     # 特权信息（推理时设为0）
-    priv_explicit = np.zeros(3, dtype=np.float32)
-    priv_latent = np.zeros(29, dtype=np.float32)
+    priv_explicit = np.zeros(3, dtype=np.float32)  # base_lin_vel
+    priv_latent = np.zeros(29, dtype=np.float32)   # 质量参数等
     
-    # 拼接：proprio(75) + heights(225) + priv_explicit(3) + priv_latent(29) + history(750)
+    # 拼接：proprio(78) + heights(225) + priv_explicit(3) + priv_latent(29) + history(780)
     full_obs = np.concatenate([proprio_obs, heights, priv_explicit, priv_latent, obs_history_buf.flatten()]).astype(np.float32)
+    
+    assert full_obs.shape[0] == 78 + 225 + 3 + 29 + 780, f"观测维度错误：{full_obs.shape[0]}"
     
     return full_obs, proprio_obs
 
@@ -160,17 +231,22 @@ def main():
     target_dof_pos = config['default_angles'].copy()
     cmd = config['cmd_init'].copy()
     obs_history_len = config['obs_history_len']
-    obs_history_buf = np.zeros((obs_history_len, 75), dtype=np.float32)
+    obs_history_buf = np.zeros((obs_history_len, 78), dtype=np.float32)  # 修改为78维
+    
+    # 初始化目标点（机器人前方2米处）
+    cur_goal = np.array([2.0, 0.0, 0.78], dtype=np.float32)
     
     # 计算总观测维度
-    total_obs_dim = 75 + num_scan + 3 + 29 + obs_history_len * 75
+    total_obs_dim = 78 + num_scan + 3 + 29 + obs_history_len * 78
     print(f"\n{'='*60}")
     print("观测维度配置:")
-    print(f"  本体感受观测 (proprio): 75 维")
+    print(f"  本体感受观测 (proprio): 78 维")
+    print(f"    - commands: 3, ang_vel: 3, delta_yaw: 1, delta_pose_x: 1, delta_pose_y: 1")
+    print(f"    - gravity: 3, dof_pos: 27, dof_vel: 27, action_history: 12")
     print(f"  高度扫描 (heights): {num_scan} 维")
     print(f"  特权显式 (priv_explicit): 3 维")
     print(f"  特权隐式 (priv_latent): 29 维")
-    print(f"  历史信息 (history): {obs_history_len} × 75 = {obs_history_len * 75} 维")
+    print(f"  历史信息 (history): {obs_history_len} × 78 = {obs_history_len * 78} 维")
     print(f"  总观测维度 (total): {total_obs_dim} 维")
     print(f"{'='*60}\n")
     
@@ -217,8 +293,21 @@ def main():
             
             counter += 1
             if counter % config['control_decimation'] == 0:
+                # 更新目标点（可选：动态更新目标，这里暂时固定）
+                # 检查是否到达目标
+                robot_pos = d.qpos[:2]
+                distance_to_goal = np.linalg.norm(cur_goal[:2] - robot_pos)
+                if distance_to_goal < 0.5:  # 到达目标，生成新目标
+                    # 在机器人前方生成新目标（示例）
+                    yaw = np.arctan2(2.0 * (d.qpos[6] * d.qpos[5] + d.qpos[3] * d.qpos[4]), 
+                                     1.0 - 2.0 * (d.qpos[4]**2 + d.qpos[5]**2))
+                    forward_dist = np.random.uniform(1.5, 3.0)
+                    cur_goal[0] = robot_pos[0] + forward_dist * np.cos(yaw)
+                    cur_goal[1] = robot_pos[1] + forward_dist * np.sin(yaw)
+                    print(f"[目标更新] 新目标: ({cur_goal[0]:.2f}, {cur_goal[1]:.2f})")
+                
                 # 计算观测并更新历史
-                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf)
+                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, cur_goal)
                 obs_history_buf = np.roll(obs_history_buf, -1, axis=0)
                 obs_history_buf[-1] = proprio_obs
                 
@@ -235,13 +324,16 @@ def main():
                 if control_counter % print_period == 0:
                     print(f"\n{'='*60}")
                     print(f"控制周期 #{control_counter}")
+                    print(f"  机器人位置: ({robot_pos[0]:.2f}, {robot_pos[1]:.2f})")
+                    print(f"  目标位置: ({cur_goal[0]:.2f}, {cur_goal[1]:.2f})")
+                    print(f"  距离目标: {distance_to_goal:.2f} m")
                     print(f"{'='*60}")
                     print(f"\n输入观测 (维度: {full_obs.shape[0]}):")
-                    print(f"  本体感受观测 (proprio, 0-74): {full_obs[0:75]}")
-                    print(f"  高度扫描 (heights, 75-299): {full_obs[75:75+num_scan]}")
-                    print(f"  特权显式 (priv_explicit, 300-302): {full_obs[75+num_scan:75+num_scan+3]}")
-                    print(f"  特权隐式 (priv_latent, 303-331): {full_obs[75+num_scan+3:75+num_scan+3+29]}")
-                    print(f"  历史信息 (history, 332-1081): {full_obs[75+num_scan+3+29:]}")
+                    print(f"  本体感受观测 (proprio, 0-77): {full_obs[0:78]}")
+                    print(f"  高度扫描 (heights, 78-302): {full_obs[78:78+num_scan]}")
+                    print(f"  特权显式 (priv_explicit, 303-305): {full_obs[78+num_scan:78+num_scan+3]}")
+                    print(f"  特权隐式 (priv_latent, 306-334): {full_obs[78+num_scan+3:78+num_scan+3+29]}")
+                    print(f"  历史信息 (history, 335-1114): {full_obs[78+num_scan+3+29:]}")
                     print(f"\n输出动作 (维度: {action.shape[0]}):")
                     print(f"  {action}")
                     print(f"{'='*60}\n")
