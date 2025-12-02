@@ -100,7 +100,7 @@ def play(args):
     if env.cfg.depth.use_camera:
         depth_encoder = ppo_runner.get_depth_encoder_inference_policy(device=env.device)
 
-    actions = torch.zeros(env.num_envs, 19, device=env.device, requires_grad=False)
+    actions = torch.zeros(env.num_envs, env.cfg.env.num_actions, device=env.device, requires_grad=False)
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 

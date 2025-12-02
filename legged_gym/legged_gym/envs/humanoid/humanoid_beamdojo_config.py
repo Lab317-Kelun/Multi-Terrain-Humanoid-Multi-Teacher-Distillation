@@ -55,18 +55,18 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
 
     class env(LeggedRobotCfg.env):
         num_envs = 2048
-        num_dofs = 27     # 机器人总自由度：全身27个关节
+        num_dofs = 12     # 机器人总自由度：只使用下肢12个关节（上肢已固定）
         episode_length_s = 20.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 78  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+27(dof_pos)+27(dof_vel)+12(action_history)=78
+        n_proprio = 48  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action_history)=48
         history_len = 10
         
         # 重新计算总观测维度
         num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv
-        num_actions = 12  # 12个关节动作
+        num_actions = 12  # 12个关节动作（只控制下肢）
         
         # 启用接触信息
         include_foot_contacts = True
@@ -231,6 +231,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         imu_link = "imu_in_pelvis"
         knee_names = ["left_knee_link", "left_hip_yaw_link", "right_knee_link", "right_hip_yaw_link"]
         self_collision = 1
+        collapse_fixed_joints = True  # 合并fixed关节（上肢已改为fixed）
         flip_visual_attachments = False
         ankle_sole_distance = 0.02
      
@@ -450,7 +451,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
 
     class estimator(LeggedRobotCfgPPO.estimator):
         """状态估计器配置"""
-        train_with_estimated_states = True
+        train_with_estimated_states = False
         learning_rate = 1.e-4
         hidden_dims = [256, 128, 64]
         priv_states_dim = HumanoidBEAMDOJOCfg.env.n_priv

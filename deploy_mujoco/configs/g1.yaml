@@ -35,6 +35,8 @@ default_angles: [-0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
 # ========== 观测缩放配置 ==========
 lin_vel_scale: 2.0       # 线速度缩放（未使用，仅训练时）
 ang_vel_scale: 0.5       # 角速度缩放
+delta_yaw_scale: 0.5     # 朝向误差缩放
+delta_pose_scale: 0.5     # 位置误差缩放
 dof_pos_scale: 1.0       # 关节位置缩放
 dof_vel_scale: 0.05     # 关节速度缩放
 action_scale: 0.25      # 动作缩放
