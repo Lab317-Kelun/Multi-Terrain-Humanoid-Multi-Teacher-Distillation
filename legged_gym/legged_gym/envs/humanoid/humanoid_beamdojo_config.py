@@ -240,7 +240,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         curriculum = True           # 是否启用课程学习
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
-        ang_vel_clip = 0.05            # 角速度命令死区阈值
+        ang_vel_clip = 0.0            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
         # 策略1：智能速度生成配置
@@ -249,8 +249,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [-0.8, 1.5] # min max [m/s]
-            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
+            lin_vel_x = [0.0, 1.5] # min max [m/s]
+            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
             heading = [-1.2, 1.2]
             # height = [-0.5, 0.0]
@@ -451,7 +451,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
 
     class estimator(LeggedRobotCfgPPO.estimator):
         """状态估计器配置"""
-        train_with_estimated_states = False
+        train_with_estimated_states = True
         learning_rate = 1.e-4
         hidden_dims = [256, 128, 64]
         priv_states_dim = HumanoidBEAMDOJOCfg.env.n_priv
