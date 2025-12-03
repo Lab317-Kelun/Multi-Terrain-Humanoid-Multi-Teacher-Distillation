@@ -358,10 +358,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         add_noise = True
         noise_level = 1.0
         class noise_scales:
-            dof_pos = 0.02
-            dof_vel = 2.0
+            dof_pos = 0.01
+            dof_vel = 1.5
             lin_vel = 0.1
-            ang_vel = 0.5
+            ang_vel = 0.2
             gravity = 0.05
             height_measurement = 0.1
             delta_yaw = 0.05
