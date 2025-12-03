@@ -66,7 +66,7 @@ def play(args):
     env_cfg.curriculum_config.survival_success_threshold = 1  # 连续存活成功次数阈值
     env_cfg.curriculum_config.survival_failure_threshold = 2   # 连续存活失败次数阈值
 
-    env_cfg.commands.ranges.lin_vel_x = [0.5, 0.6]
+    env_cfg.commands.ranges.lin_vel_x = [1.0, 1.5]
     env_cfg.commands.ranges.lin_vel_y = [-0.0, 0.0]
     env_cfg.commands.ranges.ang_vel_yaw = [-0.0, 0.0]
     env_cfg.commands.ranges.heading = [-0.0, 0.0]
@@ -92,7 +92,6 @@ def play(args):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
 
-    # load policyDec02_22-34-38--homie_stage1_onehot_velTrue
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     policy = ppo_runner.get_inference_policy(device=env.device)
