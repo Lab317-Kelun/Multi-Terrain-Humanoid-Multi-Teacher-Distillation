@@ -363,6 +363,9 @@ class HumanoidRobot(BaseTask):
                 new_next_goals = self._generate_forward_goal(env_ids_to_update)
                 self.next_goals[env_ids_to_update] = new_next_goals
                 
+                # 记录目标点生成时的机器人初始位置
+                self.goal_start_pos[env_ids_to_update] = self.root_states[env_ids_to_update, :2]
+                
                 # 重置计时器
                 self.reach_goal_timer[env_ids_to_update] = 0
                 
@@ -443,6 +446,8 @@ class HumanoidRobot(BaseTask):
         if not self.cfg.env.use_forward_goals:
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
+            # 记录目标点生成时的机器人初始位置
+            self.goal_start_pos[env_ids] = self.root_states[env_ids, :2]
 
         self.update_depth_buffer()
 
@@ -617,6 +622,8 @@ class HumanoidRobot(BaseTask):
             new_next_goals = self._generate_forward_goal(env_ids)
             self.cur_goals[env_ids] = new_cur_goals
             self.next_goals[env_ids] = new_next_goals
+            # 记录目标点生成时的机器人初始位置
+            self.goal_start_pos[env_ids] = self.root_states[env_ids, :2]
         
         # 在目标设置完成后，重新采样命令
         self._resample_commands(env_ids)
@@ -1311,6 +1318,8 @@ class HumanoidRobot(BaseTask):
         if not use_forward_goals:
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
+            # 记录目标点生成时的机器人初始位置
+            self.goal_start_pos[env_ids] = self.root_states[env_ids, :2]
         
         # 更新 next_goal_threshold 课程学习（基于成功率，与rsl_rl中的计算方式一致）
         if curriculum_cfg.success_mode == 'goal_reached' and self.next_goal_threshold_curriculum_enabled:
@@ -1390,6 +1399,9 @@ class HumanoidRobot(BaseTask):
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 到目标点的距离（统一计算，避免重复）
+        
+        # 记录目标点生成时的机器人初始位置（用于直线路径惩罚）
+        self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
         
         # 初始化步态相位相关变量
         self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -1784,6 +1796,15 @@ class HumanoidRobot(BaseTask):
             self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
+            # 记录目标点生成时的机器人初始位置（此时root_states还未初始化，使用env_origins）
+            # 如果goal_start_pos还未初始化，先初始化它
+            if not hasattr(self, 'goal_start_pos'):
+                self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
+            # 如果root_states还未初始化，使用env_origins作为初始位置
+            if hasattr(self, 'root_states'):
+                self.goal_start_pos[:] = self.root_states[:, :2]
+            else:
+                self.goal_start_pos[:] = self.env_origins[:, :2]
             
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt
@@ -2293,8 +2314,33 @@ class HumanoidRobot(BaseTask):
         return reward
             
     def _reward_center(self):
-        y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
-        return y_offset
+        """
+        惩罚机器人偏离直线路径
+        计算初始位置到目标点的向量和当前位置到目标点的向量的余弦值
+        如果方向一致（直线路径），cos值接近1；偏离时cos值会变小
+        返回 (1 - cos) 作为惩罚，偏离越大惩罚越大
+        """
+        # 初始位置到目标点的向量
+        start_to_goal = self.cur_goals[:, :2] - self.goal_start_pos  # [num_envs, 2]
+        # 当前位置到目标点的向量
+        current_to_goal = self.cur_goals[:, :2] - self.root_states[:, :2]  # [num_envs, 2]
+        
+        # 计算两个向量的模长
+        norm_start = torch.norm(start_to_goal, dim=1, keepdim=True)  # [num_envs, 1]
+        norm_current = torch.norm(current_to_goal, dim=1, keepdim=True)  # [num_envs, 1]
+        
+        # 避免除零错误
+        norm_start = torch.clamp(norm_start, min=1e-5)
+        norm_current = torch.clamp(norm_current, min=1e-5)
+        
+        # 归一化向量
+        start_to_goal_norm = start_to_goal / norm_start  # [num_envs, 2]
+        current_to_goal_norm = current_to_goal / norm_current  # [num_envs, 2]
+        
+        # 计算余弦值（点积）
+        cos_value = torch.sum(start_to_goal_norm * current_to_goal_norm, dim=1)  # [num_envs]
+        
+        return cos_value
     
     def _reward_tracking_base_height(self):
         base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]

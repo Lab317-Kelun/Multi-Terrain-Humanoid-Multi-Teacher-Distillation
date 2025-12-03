@@ -272,13 +272,15 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
+            
+            center = 2.0
         
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
             orientation = -1.5 
             action_rate = -0.01 #-0.01
             
-            # tracking_base_height = 2.
+            tracking_base_height = 2.
             deviation_hip_joint = -0.2
             deviation_ankle_joint = -0.5
             deviation_knee_joint = -0.75
@@ -286,10 +288,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_pos_limits = -2.
             feet_air_time = 0.05
             feet_clearance = -0.25
-            feet_distance_lateral = 1.0 #0.5
-            knee_distance_lateral = 1.5 #1.0
-            feet_ground_parallel = -3.0 #-2.0 
-            feet_parallel = -4.0 #-3.0
+            feet_distance_lateral = 0.5 #0.5
+            knee_distance_lateral = 1.0 #1.0
+            feet_ground_parallel = -2.0 #-2.0 
+            feet_parallel = -3.0 #-3.0
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
@@ -331,7 +333,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            # "tracking_base_height", 
+            'center',
+            "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
