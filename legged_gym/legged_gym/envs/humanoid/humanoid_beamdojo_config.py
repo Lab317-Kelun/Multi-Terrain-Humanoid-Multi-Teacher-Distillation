@@ -72,7 +72,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         include_foot_contacts = True
         use_double_critic = True
         
-        next_goal_threshold = 0.4
+        next_goal_threshold = 0.5
         reach_goal_delay = 0.05
         num_future_goal_obs = 2
         
