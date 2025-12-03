@@ -55,7 +55,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
 
     class env(LeggedRobotCfg.env):
         num_envs = 2048
-        num_dofs = 27     # 机器人总自由度：全身27个关节
+        num_dofs = 12     # 机器人总自由度：12个关节
         episode_length_s = 20.0 #与课程学习有关 
         
         n_scan = 225
@@ -239,7 +239,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         curriculum = True           # 是否启用课程学习
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
-        ang_vel_clip = 0.05            # 角速度命令死区阈值
+        ang_vel_clip = 0.0            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
         # 策略1：智能速度生成配置
@@ -356,10 +356,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         add_noise = True
         noise_level = 1.0
         class noise_scales:
-            dof_pos = 0.02
-            dof_vel = 2.0
+            dof_pos = 0.01
+            dof_vel = 1.5
             lin_vel = 0.1
-            ang_vel = 0.5
+            ang_vel = 0.2
             gravity = 0.05
             height_measurement = 0.1
             
