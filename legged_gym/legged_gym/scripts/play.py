@@ -104,8 +104,17 @@ def play(args):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
-    for i in range(10*int(env.max_episode_length)):
+    for i in range(5*int(env.max_episode_length)):
        
+        # 使用估计器估计线速度
+        if estimator is not None:
+            # 历史观测位于观测的最后 history_len * n_proprio 维
+            hist_obs = obs[:, -env.cfg.env.history_len * env.cfg.env.n_proprio:]
+            # 使用估计器估计线速度
+            priv_explicit_estimated = estimator(hist_obs)
+            # 将估计的线速度放入观测的相应位置: n_proprio + n_scan 到 n_proprio + n_scan + priv_states_dim
+            obs[:, env.cfg.env.n_proprio + env.cfg.env.n_scan : env.cfg.env.n_proprio + env.cfg.env.n_scan + env.cfg.env.n_priv] = priv_explicit_estimated
+        
         if env.cfg.depth.use_camera:
             if infos["depth"] is not None:
                 obs_student = obs[:, :env.cfg.env.n_proprio].clone()

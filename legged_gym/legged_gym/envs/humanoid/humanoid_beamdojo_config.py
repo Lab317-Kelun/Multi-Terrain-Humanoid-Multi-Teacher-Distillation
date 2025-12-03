@@ -286,11 +286,11 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_pos_limits = -2.
             feet_air_time = 0.05
             feet_clearance = -0.25
-            feet_distance_lateral = 0.5  
-            knee_distance_lateral = 1.0
-            feet_ground_parallel = -2.0  
-            feet_parallel = -3.0
-            smoothness = -0.05 #-0.05
+            feet_distance_lateral = 1.0 #0.5
+            knee_distance_lateral = 1.5 #1.0
+            feet_ground_parallel = -3.0 #-2.0 
+            feet_parallel = -4.0 #-3.0
+            smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
             torques = -2.5e-6
