@@ -60,7 +60,7 @@ def play(args):
     env_cfg.env.episode_length_s = 20
     env_cfg.commands.resampling_time = 4
     env_cfg.rewards.is_play = True
-    
+        
     env_cfg.curriculum_config.success_mode = 'goal_reached'
     env_cfg.curriculum_config.success_threshold = 1  # 连续存活成功次数阈值
     env_cfg.curriculum_config.failure_threshold = 2   # 连续存活失败次数阈值
@@ -82,7 +82,7 @@ def play(args):
     env_cfg.domain_rand.randomize_friction = True
     env_cfg.domain_rand.push_robots = False
     env_cfg.domain_rand.push_interval_s = 8
-    env_cfg.domain_rand.randomize_base_mass = True
+    env_cfg.domain_rand.randomize_base_mass = TrueDec03_20-18-42--homie_stage2_gap
     env_cfg.domain_rand.randomize_base_com = True
 
     depth_latent_buffer = []
@@ -91,7 +91,6 @@ def play(args):
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
 
-    # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     policy = ppo_runner.get_inference_policy(device=env.device)
@@ -103,7 +102,21 @@ def play(args):
     infos = {}
     infos["depth"] = env.depth_buffer.clone().to(ppo_runner.device)[:, -1] if ppo_runner.if_depth else None
 
+    # 获取配置参数
+    n_proprio = env.cfg.env.n_proprio
+    n_scan = env.cfg.env.n_scan
+    history_len = env.cfg.env.history_len
+    n_priv_explicit = env.cfg.env.n_priv  # priv_explicit 维度
+
     for i in range(10*int(env.max_episode_length)):
+        # 使用 estimator 估计隐式特权信息
+        # 历史观测位于观测的最后 history_len * n_proprio 维
+        hist_obs = obs[:, -history_len * n_proprio:]
+        # 使用 estimator 估计 priv_explicit
+        priv_explicit_estimated = estimator(hist_obs)
+        # 将估计的 priv_explicit 替换到观测中的相应位置
+        # priv_explicit 的位置：n_proprio + n_scan 到 n_proprio + n_scan + n_priv_explicit
+        obs[:, n_proprio + n_scan : n_proprio + n_scan + n_priv_explicit] = priv_explicit_estimated
        
         if env.cfg.depth.use_camera:
             if infos["depth"] is not None:
