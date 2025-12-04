@@ -247,7 +247,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [-0.8, 1.5] # min max [m/s]
+            lin_vel_x = [-0.8, 1.0] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
             heading = [0.0, 0.0]
@@ -256,7 +256,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         """BEAMDOJO奖励配置"""
         class scales:
-            tracking_x_vel = 1.5
+            tracking_x_vel = 2.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
@@ -294,7 +294,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             action_vanish = -1.0
             stand_still = -0.15
             
-            foothold = 0.05
+            foothold = 0.025
             
         only_positive_rewards = False
         tracking_sigma = 0.25
