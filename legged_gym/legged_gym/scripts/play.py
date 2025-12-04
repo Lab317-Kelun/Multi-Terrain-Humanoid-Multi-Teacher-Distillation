@@ -72,7 +72,7 @@ def play(args):
     env_cfg.commands.ranges.heading = [-0.0, 0.0]
     env_cfg.commands.ranges.height = [-0.0, 0.0]
     
-    env_cfg.terrain.num_rows = 2
+    env_cfg.terrain.num_rows = 8
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.max_init_terrain_level = 0
 

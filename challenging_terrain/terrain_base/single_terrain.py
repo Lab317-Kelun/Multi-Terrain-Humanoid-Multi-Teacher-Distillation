@@ -926,8 +926,8 @@ class single_terrain:
                         start_y=0,
                         platform_size=1.0,
                         difficulty=0.5,
-                        stone_sizes=[0.8, 0.65, 0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.2],  # 石头尺寸序列（米）
-                        lateral_gap_range=[0.1, 0.3],   # 左右石块之间的间隙范围（米）
+                        stone_sizes=[0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25, 0.2, 0.2],  # 石头尺寸序列（米）
+                        lateral_gap_range=[0.0, 0.3],   # 左右石块之间的间隙范围（米）
                         pit_depth=1.0,                  # 深坑深度（米）
                         ):
         """
@@ -960,7 +960,7 @@ class single_terrain:
         stone_size_grid = round(stone_size / terrain.horizontal_scale)
         
         # 前后石头间距：0.1 + 0.05*l (随难度增加而增大)
-        stone_gap = 0.1 + 0.05 * level
+        stone_gap = 0.05 + 0.04 * level
         stone_gap_grid = round(stone_gap / terrain.horizontal_scale)
         
         # 左右间距：随难度增加而增大（难度0时最小，难度1时最大）
