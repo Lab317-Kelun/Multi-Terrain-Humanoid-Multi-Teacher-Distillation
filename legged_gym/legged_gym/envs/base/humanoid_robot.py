@@ -369,8 +369,15 @@ class HumanoidRobot(BaseTask):
                 # 重置计时器
                 self.reach_goal_timer[env_ids_to_update] = 0
                 
-                # 目标已更新，重新计算期望到达时间
-                self._update_goal_timeout_from_speed(env_ids_to_update)
+                # 标记这些环境需要重新计算期望时间(在首次对齐时)
+                if not hasattr(self, 'need_recalc_timeout'):
+                    self.need_recalc_timeout = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+                self.need_recalc_timeout[env_ids_to_update] = True
+                
+                # 清除"已开始移动"标志(新目标需要重新判断)
+                if not hasattr(self, 'goal_started_moving'):
+                    self.goal_started_moving = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+                self.goal_started_moving[env_ids_to_update] = False
         else:
             # 原有逻辑：使用预定义的目标列表
             next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
@@ -407,9 +414,9 @@ class HumanoidRobot(BaseTask):
         self.episode_length_buf += 1
         self.common_step_counter += 1
         
-        # 更新目标到达超时计时器
-        self.goal_timeout_timer += self.dt
-
+        # 注意：超时计时器的更新移到了_post_physics_step_callback中
+        # 因为需要先计算朝向误差，判断是否在转向状态
+        
         # prepare quantities
         self.base_quat[:] = self.root_states[:, 3:7]
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
@@ -513,8 +520,15 @@ class HumanoidRobot(BaseTask):
         goal_not_reached = self.distance_to_goal >= goal_threshold
         timeout_exceeded = self.goal_timeout_timer >= self.goal_timeout_duration
         goal_timeout = timeout_exceeded & goal_not_reached
-        # print('self.goal_timeout_timer',self.goal_timeout_timer)
-        # print('self.goal_timeout_duration',self.goal_timeout_duration)
+        
+        # 检测计时器没变化(从对齐变为未对齐),触发重置
+        # if self.cfg.env.use_forward_goals:
+        #     # 计时器没变化 且 计时器已经开始累积过(>0) 且 还没到达目标,说明从对齐变为未对齐
+        #     timer_unchanged = torch.abs(self.goal_timeout_timer - self.last_goal_timeout_timer) < 1e-6
+        #     timer_has_started = self.goal_timeout_timer > 0.01  # 计时器已经累积过
+        #     became_unaligned = timer_unchanged & timer_has_started & goal_not_reached  # 必须还没到达目标
+        #     # 更新上一步的计时器值
+        #     self.last_goal_timeout_timer = self.goal_timeout_timer.clone()
 
         self.reset_buf |= self.time_out_buf
         self.reset_buf |= goal_timeout  # 超时未到达目标也终止
@@ -523,6 +537,7 @@ class HumanoidRobot(BaseTask):
         self.reset_buf |= pitch_cutoff
         self.reset_buf |= height_cutoff
         self.reset_buf |= boundary_cutoff  # 超出地形边界也终止
+        # self.reset_buf |= became_unaligned  # 从对齐变为未对齐也终止
 
         self.total_times += len(self.reset_buf.nonzero(as_tuple=False).flatten())
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
@@ -627,17 +642,41 @@ class HumanoidRobot(BaseTask):
         
         # 在目标设置完成后，重新采样命令
         self._resample_commands(env_ids)
-        # if self.cfg.env.use_forward_goals:
-        #     self.commands[env_ids, 3] = self.target_yaw[env_ids]
-        #     heading_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
-        #     ang_vel_cmd = 0.8 * heading_error
-        #     small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
-        #     self.commands[:, 2] = torch.where(small_command_mask, 
-        #                                     torch.zeros_like(ang_vel_cmd), 
-        #                                     ang_vel_cmd)
         
-        # 只在重置时计算一次期望到达时间（根据当前速度命令）
-        self._update_goal_timeout_from_speed(env_ids)
+        # 如果使用前方目标模式，应用"先转向再移动"的逻辑
+        if self.cfg.env.use_forward_goals:
+            # 保存原始采样的线速度
+            self.original_lin_vel_cmd[env_ids] = self.commands[env_ids, :2].clone()
+            
+            # 计算到目标的朝向（target_yaw）
+            target_pos_rel = self.cur_goals[env_ids, :2] - self.root_states[env_ids, :2]
+            norm = torch.norm(target_pos_rel, dim=-1, keepdim=True)
+            target_vec_norm = target_pos_rel / (norm + 1e-5)
+            target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
+            
+            heading_error = wrap_to_pi(target_yaw - self.yaw[env_ids])
+            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.3)
+            
+            # 初始重置时，如果朝向误差大，先把线速度归0
+            heading_aligned = torch.abs(heading_error) < yaw_tolerance
+            self.commands[env_ids, 0] = torch.where(heading_aligned, 
+                                                   self.original_lin_vel_cmd[env_ids, 0],
+                                                   torch.zeros_like(self.commands[env_ids, 0]))
+            self.commands[env_ids, 1] = torch.where(heading_aligned, 
+                                                   self.original_lin_vel_cmd[env_ids, 1],
+                                                   torch.zeros_like(self.commands[env_ids, 1]))
+            
+            # 重置计时器和标记(期望时间会在首次对齐时计算)
+            self.goal_timeout_timer[env_ids] = 0.0
+            self.goal_timeout_duration[env_ids] = 1000.0
+            if not hasattr(self, 'need_recalc_timeout'):
+                self.need_recalc_timeout = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self.need_recalc_timeout[env_ids] = True
+            
+            # 清除"已开始移动"标志
+            if not hasattr(self, 'goal_started_moving'):
+                self.goal_started_moving = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self.goal_started_moving[env_ids] = False
         
         # fill extras
         self.extras["episode"] = {}
@@ -958,16 +997,65 @@ class HumanoidRobot(BaseTask):
             self.measured_heights, self.measured_heights_data  = self._get_heights()
         
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
-        self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
+        resample_env_ids = env_ids.nonzero(as_tuple=False).flatten()
+        self._resample_commands(resample_env_ids)
+        
+        # 如果重新采样了命令，保存原始线速度（用于"先转向再移动"逻辑）
+        if self.cfg.env.use_forward_goals and len(resample_env_ids) > 0:
+            self.original_lin_vel_cmd[resample_env_ids] = self.commands[resample_env_ids, :2].clone()
 
         if self.cfg.env.use_forward_goals:
             self.commands[:, 3] = self.target_yaw
             heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+            
+            # 获取配置参数
+            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.3)
+            
+            # 计算角速度命令
             ang_vel_cmd = 0.8 * heading_error
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
                                             torch.zeros_like(ang_vel_cmd), 
                                             ang_vel_cmd)
+            
+            # 判断朝向是否对齐
+            heading_aligned = torch.abs(heading_error) < yaw_tolerance
+            
+            # 检测首次对齐:需要重新计算 且 当前对齐
+            first_aligned = self.need_recalc_timeout & heading_aligned
+            if first_aligned.any():
+                # 首次对齐时,从当前位置计算期望到达时间
+                first_aligned_ids = first_aligned.nonzero(as_tuple=False).flatten()
+                self._update_goal_timeout_from_speed(first_aligned_ids)
+                # 标记已计算,不再重复计算
+                self.need_recalc_timeout[first_aligned_ids] = False
+            
+            # 设置线速度命令
+            self.commands[:, 0] = torch.where(heading_aligned, 
+                                            self.original_lin_vel_cmd[:, 0],
+                                            torch.zeros_like(self.commands[:, 0]))
+            self.commands[:, 1] = torch.where(heading_aligned, 
+                                            self.original_lin_vel_cmd[:, 1],
+                                            torch.zeros_like(self.commands[:, 1]))
+            
+            # 标记第一次对齐的环境
+            just_aligned = heading_aligned & (~self.goal_started_moving)
+            self.goal_started_moving |= just_aligned
+            
+            # 从第一次对齐后就持续累积计时器(无论之后是否偏离)
+            self.goal_timeout_timer += torch.where(self.goal_started_moving, 
+                                                   torch.full_like(self.goal_timeout_timer, self.dt),
+                                                   torch.zeros_like(self.goal_timeout_timer))
+            
+            # 实时打印第一个环境的速度和角速度
+            env_id = 0
+            print(f"[Step {self.global_counter:5d}] "
+                  f"原始速度: x={self.original_lin_vel_cmd[env_id, 0].item():5.2f} y={self.original_lin_vel_cmd[env_id, 1].item():5.2f} | "
+                  f"当前速度: x={self.commands[env_id, 0].item():5.2f} y={self.commands[env_id, 1].item():5.2f} | "
+                  f"角速度: {self.commands[env_id, 2].item():6.3f} | "
+                  f"朝向误差: {np.degrees(heading_error[env_id].item()):6.1f}° | "
+                  f"状态: {'✓对齐' if heading_aligned[env_id] else '✗转向'} | "
+                  f"线速度计时: {self.goal_timeout_timer[env_id].item():5.2f}s/{self.goal_timeout_duration[env_id].item():5.2f}s")
 
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
@@ -1093,8 +1181,9 @@ class HumanoidRobot(BaseTask):
         # 计算到目标点的距离
         self.distance_to_goal[env_ids] = torch.norm(self.cur_goals[env_ids, :2] - self.root_states[env_ids, :2], dim=1)
         
-        # 获取x方向的线速度（绝对值）
-        lin_vel_x = torch.abs(self.commands[env_ids, 0])
+        # 关键修复：使用原始采样的线速度（而不是可能被设为0的当前命令）
+        # 因为在"先转向再移动"逻辑中，self.commands[:, 0]会被临时设为0
+        lin_vel_x = torch.abs(self.original_lin_vel_cmd[env_ids, 0])
         
         # 计算期望到达时间 = 距离 / x速度
         min_vel_x = 0.01  # 最小x速度阈值，避免除零
@@ -1368,6 +1457,9 @@ class HumanoidRobot(BaseTask):
         # 目标到达超时相关缓冲区
         self.goal_timeout_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 从设置速度开始的计时
         self.goal_timeout_duration = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * 1000.0  # 期望到达时间（秒）
+        self.last_goal_timeout_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 上一步的计时器值
+        self.need_recalc_timeout = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 是否需要重新计算期望时间
+        self.goal_started_moving = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 标记该目标是否已经开始移动（第一次对齐后）
         
         # 动态计算高度采样点数
         num_height_points = len(self.cfg.terrain.measured_points_x) * len(self.cfg.terrain.measured_points_y)
@@ -1391,6 +1483,9 @@ class HumanoidRobot(BaseTask):
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float, device=self.device, requires_grad=False) # x vel, y vel, yaw vel, heading
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
+        
+        # 保存原始采样的线速度命令（用于"先转向再移动"逻辑）
+        self.original_lin_vel_cmd = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.feet_max_height = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)

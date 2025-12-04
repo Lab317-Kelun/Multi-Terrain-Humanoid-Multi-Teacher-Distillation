@@ -1,25 +1,25 @@
-# BEAMDOJO Humanoid Robot Configuration
-# 基于BEAMDOJO论文的人形机器人配置示例
-# 展示双Critic网络、两阶段训练和Foothold奖励的完整配置
+# BEAMDOJO + AMP Humanoid Robot Configuration
+# 结合BEAMDOJO双Critic与AMP对抗式动作先验
+# AMP用于学习自然的人形运动，BeamDojo用于地形导航
 
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
-class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
+class HumanoidBEAMDOJOAMPCfg(LeggedRobotCfg):
     class init_state( LeggedRobotCfg.init_state ):
         pos = [0.0, 0.0, 0.78] # x,y,z [m]
         default_joint_angles = { # = target angles [rad] when action = 0.0
             'left_hip_yaw_joint' : 0. ,   
-            'left_hip_roll_joint' : 0,               
-            'left_hip_pitch_joint' : -0.1,         
-            'left_knee_joint' : 0.3,       
-            'left_ankle_pitch_joint' : -0.2,     
-            'left_ankle_roll_joint' : 0,     
-            'right_hip_yaw_joint' : 0., 
-            'right_hip_roll_joint' : 0, 
-            'right_hip_pitch_joint' : -0.1,                                       
-            'right_knee_joint' : 0.3,                                             
-            'right_ankle_pitch_joint': -0.2,                              
-            'right_ankle_roll_joint' : 0,         
+           'left_hip_roll_joint' : 0,               
+           'left_hip_pitch_joint' : -0.1,         
+           'left_knee_joint' : 0.3,       
+           'left_ankle_pitch_joint' : -0.2,     
+           'left_ankle_roll_joint' : 0,     
+           'right_hip_yaw_joint' : 0., 
+           'right_hip_roll_joint' : 0, 
+           'right_hip_pitch_joint' : -0.1,                                       
+           'right_knee_joint' : 0.3,                                             
+           'right_ankle_pitch_joint': -0.2,                              
+           'right_ankle_roll_joint' : 0,         
             "waist_yaw_joint":0.,
             "waist_roll_joint": 0.,
             "waist_pitch_joint": 0.,
@@ -38,9 +38,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "left_hand_thumb_1_joint": 0.,
             "left_hand_thumb_2_joint": 0.,
             "right_shoulder_pitch_joint": 0.,
-            "right_shoulder_roll_joint": -0.,#-0.3
+            "right_shoulder_roll_joint": -0.,
             "right_shoulder_yaw_joint": 0.,
-            "right_elbow_joint": 0.,#0.8
+            "right_elbow_joint": 0.,
             "right_wrist_roll_joint": 0.,
             "right_wrist_pitch_joint": 0.,
             "right_wrist_yaw_joint": 0.,
@@ -55,60 +55,54 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
 
     class env(LeggedRobotCfg.env):
         num_envs = 2048
-        num_dofs = 12     # 机器人总自由度：只使用下肢12个关节（上肢已固定）
-        episode_length_s = 35.0 #与课程学习有关 
+        num_dofs = 27     # 机器人总自由度：全身27个关节
+        episode_length_s = 20.0
         
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 48  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action_history)=48
+        n_proprio = 75  # 实际obs_buf维度
         history_len = 10
+        
+        use_double_critic = True
+        
+        # AMP相关配置
+        enable_amp = True                    # 启用AMP
+        num_disc_obs_steps = 10              # discriminator观测的历史步数
+        amp_motion_files = ['/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/data/g1_walk.pkl'] 
+        amp_replay_buffer_size = 100000      # AMP replay buffer大小
+        
+        # AMP观测坐标系配置（参考MimicKit）
+        amp_global_obs = False               # False: 使用heading坐标系（局部，只考虑yaw旋转）
+                                             # True: 使用全局坐标系
+                                             # 推荐：False（局部坐标系，更稳定）
+        amp_root_height_obs = True           # True: root位置包含z坐标（高度）
+                                             # False: root位置只包含x, y坐标
+                                             # 推荐：True（包含高度信息）
+        
+        # 调试配置
+        debug_amp_obs = True                 # 启用AMP观测调试信息（观测维度、数值范围等）
         
         # 重新计算总观测维度
         num_observations = n_proprio + n_scan + history_len*n_proprio + n_priv_latent + n_priv
         num_actions = 12  # 12个关节动作
         
-        num_goals = 4
-        
         # 启用接触信息
         include_foot_contacts = True
-        use_double_critic = True
-        use_forward_goals = True
-        
-        next_goal_threshold = 0.4
-        reach_goal_delay = 0.1
-        num_future_goal_obs = 2
         
     # 课程学习配置
     class curriculum_config:
-        # === 课程学习成功判定模式 ===
-        success_mode = 'goal_reached'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
-        
-        # === 成功率计算模式 (用于日志记录) ===
-        success_rate_mode = 'goal_based'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
-        
-        # 目标到达模式参数
-        success_threshold = 3  # 连续成功次数阈值
-        failure_threshold = 2  # 连续失败次数阈值
-        
-        # next_goal_threshold 课程学习参数
-        next_goal_threshold_curriculum = True  # 是否启用 next_goal_threshold 课程学习
-        next_goal_threshold_init = 0.4  # 初始阈值
-        next_goal_threshold_target = 0.1  # 目标阈值
-        next_goal_threshold_step = 0.001  # 每次成功时降低的步长
-        next_goal_threshold_success_rate = 0.7  # 成功率阈值，超过此值才降低阈值
-         
-        # 存活时间模式参数
-        survival_time_threshold = 35.0  # 存活时间阈值（秒）
-        survival_success_threshold = 3  # 连续存活成功次数阈值
-        survival_failure_threshold = 2   # 连续存活失败次数阈值
-        
-        # 速度模式参数
-        velocity_success_threshold = 3  # 连续速度成功次数阈值
-        velocity_failure_threshold = 2   # 连续速度失败次数阈值
-        
+        success_mode = 'vel_tracking'
+        success_rate_mode = 'survival_time'
+        success_threshold = 3
+        failure_threshold = 2
+        survival_time_threshold = 20.0
+        survival_success_threshold = 3
+        survival_failure_threshold = 2
+        velocity_success_threshold = 3
+        velocity_failure_threshold = 2
+    
     class control( LeggedRobotCfg.control ):
-        # PD Drive parameters:
         control_type = 'P'
         stiffness = {'hip_yaw': 100,
                      'hip_roll': 100,
@@ -120,7 +114,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
                      "wrist": 20,
                      "elbow": 100,
                      "hand": 10
-                     }  # [N*m/rad]
+                     }
         damping = {  'hip_yaw': 2,
                      'hip_roll': 2,
                      'hip_pitch': 2,
@@ -131,40 +125,37 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
                      "wrist": 0.5,
                      "elbow": 1,
                      "hand": 2
-                     }  # [N*m/rad]  # [N*m*s/rad]
-        # action scale: target angle = actionScale * action + defaultAngle
+                     }
         action_scale = 0.25
-        # decimation: Number of control action updates @ sim DT per policy DT
         decimation = 4    
         hip_reduction = 1.0
     
     class domain_rand(LeggedRobotCfg.domain_rand):
-        randomize_friction = True            # 随机化摩擦系数
-        friction_range = [0.8, 0.8]         # 恢复原始摩擦系数
-        randomize_base_mass = True          # 随机化质量
-        added_mass_range = [-2.0, 2.0]      # 负载质量 U(-2.0, 2.0) kg
-        randomize_base_com = True           # 随机化质心位置
-        added_com_range = [-0.05, 0.05]     # 质心偏移 U(-0.05, 0.05) m
-        push_robots = True                   # 启用外部推力（抗干扰训练）
-        push_interval_s = 8                  # 推力间隔：每8秒推一次
-        max_push_vel_xy = 0.5                # 最大推力速度：±0.5 m/s
+        randomize_friction = True
+        friction_range = [0.8, 0.8]
+        randomize_base_mass = True
+        added_mass_range = [-2.0, 2.0]
+        randomize_base_com = True
+        added_com_range = [-0.05, 0.05]
+        push_robots = True
+        push_interval_s = 8
+        max_push_vel_xy = 0.5
 
-        randomize_motor = True              # 随机化电机特性
-        motor_strength_range = [0.9, 1.1]   # 电机强度噪声 U(0.9, 1.1)
+        randomize_motor = True
+        motor_strength_range = [0.9, 1.1]
         
-        randomize_actuator_offset = True    # 随机化执行器零位偏移
-        actuator_offset_range = [-0.05, 0.05]  # 执行器偏移 U(-0.05, 0.05) rad
+        randomize_actuator_offset = True
+        actuator_offset_range = [-0.05, 0.05]
         
-        randomize_pd_gains = True           # 随机化PD增益
-        pd_gain_range = [0.85, 1.15]        # Kp/Kd噪声因子 U(0.85, 1.15)
+        randomize_pd_gains = True
+        pd_gain_range = [0.85, 1.15]
 
-        # 动作延迟相关参数（BeamDojo域随机化）
-        delay_update_global_steps = 24 * 8000  # 延迟更新的全局步数
-        action_delay = True              # 是否启用动作延迟
-        action_curr_step = [1, 1]         # 当前动作步数范围
-        action_curr_step_scratch = [0, 1] # 从头训练时的动作步数范围
-        action_delay_view = 1             # 动作延迟视图
-        action_buf_len = 8                # 动作缓冲区长度
+        delay_update_global_steps = 24 * 8000
+        action_delay = True
+        action_curr_step = [1, 1]
+        action_curr_step_scratch = [0, 1]
+        action_delay_view = 1
+        action_buf_len = 8
         
         use_random = True
         
@@ -212,14 +203,14 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         init_upper_ratio = 0.
         delay = use_random
         
-        randomize_start_pos = False    # 是否随机化起始位置
-        randomize_start_vel = False    # 是否随机化起始速度
-        randomize_start_yaw = False    # 是否随机化起始偏航角
-        rand_yaw_range = 1.2          # 偏航角随机范围
-        randomize_start_y = False     # 是否随机化Y轴起始位置
-        rand_y_range = 0.5            # Y轴随机范围
-        randomize_start_pitch = False  # 是否随机化起始俯仰角
-        rand_pitch_range = 1.6        # 俯仰角随机范围
+        randomize_start_pos = False
+        randomize_start_vel = False
+        randomize_start_yaw = False
+        rand_yaw_range = 1.2
+        randomize_start_y = False
+        rand_y_range = 0.5
+        randomize_start_pitch = False
+        rand_pitch_range = 1.6
 
     class asset( LeggedRobotCfg.asset ):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1.urdf'
@@ -241,44 +232,52 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         imu_link = "imu_in_pelvis"
         knee_names = ["left_knee_link", "left_hip_yaw_link", "right_knee_link", "right_hip_yaw_link"]
         self_collision = 1
-        collapse_fixed_joints = True  # 合并fixed关节（上肢已改为fixed）
         flip_visual_attachments = False
         ankle_sole_distance = 0.02
-     
+        
+        # AMP关键身体部位（用于discriminator观测）
+        # 只使用下半身关键部位，不包含上半身（手部）
+        # - torso_link: 躯干中心（作为参考点）
+        # - left_hip_yaw_link, right_hip_yaw_link: 髋部位置（重要步态特征）
+        # - left_knee_link, right_knee_link: 膝盖位置（重要步态特征）
+        # - left_ankle_roll_link, right_ankle_roll_link: 脚踝位置（接触点）
+        key_bodies = ["torso_link", 
+                     "left_hip_yaw_link", "right_hip_yaw_link",
+                     "left_knee_link", "right_knee_link",
+                     "left_ankle_roll_link", "right_ankle_roll_link"]
+        
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
-        curriculum = True           # 是否启用课程学习
-        resampling_time = 4.0         # 命令重采样时间间隔（秒）
-        heading_command = False         # 启用朝向命令模式
-        ang_vel_clip = 0.0            # 角速度命令死区阈值
-        lin_vel_clip = 0.1            # 线速度命令死区阈值
+        curriculum = True
+        resampling_time = 4.0
+        heading_command = True
+        ang_vel_clip = 0.05
+        lin_vel_clip = 0.1
         
-        # 策略1：智能速度生成配置
-        height_adaptive_speed = False   # 启用基于高度的自适应速度
-        speed_complexity_weight = 0.4  # 地形复杂度权重
-        speed_gradient_weight = 0.4   # 高度梯度权重  
-        speed_roughness_weight = 0.2  # 地形粗糙度权重
+        height_adaptive_speed = False
+        speed_complexity_weight = 0.4
+        speed_gradient_weight = 0.4  
+        speed_roughness_weight = 0.2
+        
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.5, 0.5] # min max [m/s]
-            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
-            ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
-            heading = [-0.0, 0.0]
-            # height = [-0.5, 0.0]
+            lin_vel_x = [-0.8, 1.5]
+            lin_vel_y = [-0.5, 0.5]
+            ang_vel_yaw = [-0.8, 0.8]
+            heading = [-1.0, 1.0]
                         
     class rewards(LeggedRobotCfg.rewards):
-        """BEAMDOJO奖励配置"""
+        """BEAMDOJO + AMP 奖励配置"""
         class scales:
+            # ====== BEAMDOJO任务奖励 ======
             tracking_x_vel = 1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
-            
-            center = 2.0
-        
+              
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
             orientation = -1.5 
-            action_rate = -0.01 #-0.01
+            action_rate = -0.01
             
             tracking_base_height = 2.
             deviation_hip_joint = -0.2
@@ -288,10 +287,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_pos_limits = -2.
             feet_air_time = 0.05
             feet_clearance = -0.25
-            feet_distance_lateral = 0.5 #0.5
-            knee_distance_lateral = 1.0 #1.0
-            feet_ground_parallel = -2.0 #-2.0 
-            feet_parallel = -3.0 #-3.0
+            feet_distance_lateral = 0.5  
+            knee_distance_lateral = 1.0
+            feet_ground_parallel = -2.0  
+            feet_parallel = -3.0
             smoothness = -0.05
             joint_power = -2e-5
             feet_stumble = -1.5
@@ -306,8 +305,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             action_vanish = -1.0
             stand_still = -0.15
             
-            # foothold = 0.05
-            goal_reached = 10.0 
+            foothold = 0.05
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -326,34 +324,29 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         foothold_foot_length = 0.12
         foothold_foot_width = 0.06
-        foothold_height_tolerance = -0.1     
-
+        foothold_height_tolerance = -0.1
+        
+            
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
-            'center',
-            "tracking_base_height", 
-            "deviation_hip_joint", "deviation_ankle_joint", 
+            "tracking_base_height", "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
             "feet_clearance", "feet_distance_lateral", "knee_distance_lateral",
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",
             "feet_stumble", "torques", "dof_vel", "dof_vel_limits", "torque_limits",
             "no_fly", "feet_slip", "feet_contact_forces",
             "contact_momentum", "action_vanish", "stand_still",
-            # 'termination'
         ]
-        sparse_rewards = ['foothold', 'goal_reached']
+        sparse_rewards = ['foothold']
         
     class normalization:
         """归一化配置"""
         class obs_scales:
             lin_vel = 2.0
             ang_vel = 0.5
-            delta_yaw = 0.5
-            delta_pose_x = 0.5     
-            delta_pose_y = 0.5
             dof_pos = 1.0
             dof_vel = 0.05
             height_measurements = 5.0
@@ -372,9 +365,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             ang_vel = 0.5
             gravity = 0.05
             height_measurement = 0.1
-            delta_yaw = 0.05
-            delta_pose_x = 0.05
-            delta_pose_y = 0.05
             
     class sim:
         """仿真配置"""
@@ -392,12 +382,12 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             rest_offset = 0.0
             bounce_threshold_velocity = 0.5
             max_depenetration_velocity = 1.0
-            max_gpu_contact_pairs = 2**23  # 增加到2**24以支持更多环境
-            default_buffer_size_multiplier = 5  # 增加缓冲区倍数
+            max_gpu_contact_pairs = 2**23
+            default_buffer_size_multiplier = 5
             contact_collection = 2
 
 
-class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
+class HumanoidBEAMDOJOAMPCfgPPO(LeggedRobotCfgPPO):
     seed = 1
     runner_class_name = 'OnPolicyRunner'
     
@@ -411,13 +401,13 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         # 扫描编码器配置
         scan_encoder_dims = [128, 64, 32]
         priv_encoder_dims = [64, 20]
-        tanh_encoder_output = False  # 编码器输出是否使用tanh激活
+        tanh_encoder_output = False
         
-        # 支持双Critic的编码器
-        use_double_critic = True  # 在这里可以启用双Critic
+        # 双Critic配置
+        use_double_critic = True
         
     class algorithm(LeggedRobotCfgPPO.algorithm):
-        """BEAMDOJO PPO算法配置"""
+        """BEAMDOJO + AMP PPO算法配置"""
         # 基础PPO参数
         value_loss_coef = 1.0
         use_clipped_value_loss = True
@@ -434,22 +424,42 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         adam_epsilon = 1e-8
         
         # BEAMDOJO双Critic配置
-        use_double_critic = True      # 设置为True启用双Critic
-        dense_value_loss_coef = 1.0    # 密集奖励价值损失系数
-        sparse_value_loss_coef = 1.0   # 稀疏奖励价值损失系数
-        advantage_merge_weight = 0.5   # 优势函数合并权重
+        use_double_critic = True
+        dense_value_loss_coef = 1.0
+        sparse_value_loss_coef = 1.0
+        advantage_merge_weight = 0.5
         dense_reward_weight = 1.0
         sparse_reward_weight = 0.25
         
+        # ====== AMP discriminator配置（完全对齐MimicKit标准）=====
+        enable_amp = True                      # 启用AMP
+        disc_hidden_dims = [1024, 512]         # discriminator隐藏层（MimicKit标准：fc_2layers_1024units = [1024, 512]）
+        disc_learning_rate = 5e-5              # discriminator学习率（MimicKit标准：5e-5）
+        disc_loss_weight = 5.0                 # discriminator损失权重（MimicKit标准：5.0）
+        disc_logit_reg = 0.01                  # logit正则化（MimicKit标准：0.01）
+        disc_grad_penalty = 5.0                # 梯度惩罚（MimicKit标准：5.0，WGAN-GP风格）
+        disc_weight_decay = 0.0001             # 权重衰减（MimicKit标准：0.0001）
+        disc_reward_scale = 2.0                # discriminator奖励缩放（MimicKit标准：2.0）
+        disc_eval_batch_size = 4096            # 评估batch大小（用于避免OOM）
+        
+        # 奖励权重配置（根据训练目标选择）：
+        # - 纯AMP训练（只学习风格）：task_reward_weight=0.0, disc_reward_weight=1.0
+        # - AMP+任务训练（同时学习风格和任务）：task_reward_weight=0.5, disc_reward_weight=0.5
+        task_reward_weight = 0.5               # 任务奖励权重（0.5 = 同时学习任务和风格）
+        disc_reward_weight = 0.5               # AMP奖励权重（0.5 = 同时学习任务和风格）
+        
+        # 调试配置
+        debug_amp = True                      # 启用AMP算法调试信息（normalizer、discriminator等） 
+        
     class runner(LeggedRobotCfgPPO.runner):
         """训练运行器配置"""
-        policy_class_name = 'ActorCriticRMADoubleReward'  # 使用 'ActorCriticRMADoubleReward' 启用双Critic
-        algorithm_class_name = 'PPODoubleReward'       # 使用 'PPODoubleReward' 启用双Critic算法
+        policy_class_name = 'ActorCriticRMADoubleRewardAMP'  # 使用支持AMP的双Critic策略
+        algorithm_class_name = 'PPODoubleRewardAMP'           # 使用支持AMP的双Critic算法
         num_steps_per_env = 24  
         max_iterations = 100000
         
         save_interval = 200
-        experiment_name = 'humanoid_beamdojo'
+        experiment_name = 'humanoid_beamdojo_amp'
         run_name = ''
         
         resume = False
@@ -462,7 +472,8 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         train_with_estimated_states = True
         learning_rate = 1.e-4
         hidden_dims = [256, 128, 64]
-        priv_states_dim = HumanoidBEAMDOJOCfg.env.n_priv
-        num_prop = HumanoidBEAMDOJOCfg.env.n_proprio
-        num_scan = HumanoidBEAMDOJOCfg.env.n_scan
-        num_hist = HumanoidBEAMDOJOCfg.env.history_len
+        priv_states_dim = HumanoidBEAMDOJOAMPCfg.env.n_priv
+        num_prop = HumanoidBEAMDOJOAMPCfg.env.n_proprio
+        num_scan = HumanoidBEAMDOJOAMPCfg.env.n_scan
+        num_hist = HumanoidBEAMDOJOAMPCfg.env.history_len
+
