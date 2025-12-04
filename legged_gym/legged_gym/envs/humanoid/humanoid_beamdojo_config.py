@@ -435,7 +435,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         num_steps_per_env = 24  
         max_iterations = 100000
         
-        save_interval = 200
+        save_interval = 100
         experiment_name = 'humanoid_beamdojo'
         run_name = ''
         

@@ -57,8 +57,10 @@ def pd_control(target_q, q, kp, target_dq, dq, kd):
     """PD控制器：根据位置和速度误差计算力矩"""
     return (target_q - q) * kp + (target_dq - dq) * kd
 
-def get_scan_from_terrain(m, d, scan_points_body):
-    """从MuJoCo地形获取地形高度（世界坐标系z坐标）"""
+def get_scan_from_terrain(m, d, scan_points_body, pelvis_bodyid):
+    """从MuJoCo地形获取地形高度（世界坐标系z坐标）
+    射线会穿过机器人身体，只检测地形
+    """
     num_points = scan_points_body.shape[0]
     base_pos = d.qpos[:3]
     base_quat = d.qpos[3:7]
@@ -77,12 +79,17 @@ def get_scan_from_terrain(m, d, scan_points_body):
     # 创建 geomid 输出数组（新版本 MuJoCo API）
     geomid = np.array([-1], dtype=np.int32)
     
+    # 使用 bodyexclude 排除机器人身体，只检测静态地形
     for i in range(num_points):
         distance = mujoco.mj_ray(m, d, ray_start[i], ray_dir, 
-                                 geomgroup=None, flg_static=1, bodyexclude=-1, geomid=geomid)
+                                 geomgroup=None, flg_static=1,  # 只检测静态几何体（地形）
+                                 bodyexclude=pelvis_bodyid if pelvis_bodyid >= 0 else -1, 
+                                 geomid=geomid)
+        
         if geomid[0] >= 0 and distance < ray_length:
             terrain_heights[i] = (ray_start[i] + ray_dir * distance)[2]
         else:
+            # 如果没有找到地形，使用默认值
             terrain_heights[i] = base_pos[2] - 2.0
     
     return terrain_heights
@@ -118,7 +125,7 @@ def compute_proprioceptive_obs(d, config, action, cmd):
     
     return proprio_obs
 
-def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, debug=False):
+def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, pelvis_bodyid, debug=False):
     """计算完整的RMA格式观测向量
     修改！维度变化：
     - 原来：75 + 225 + 3 + 29 + 75*10 = 1082
@@ -130,8 +137,10 @@ def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_hi
     # 高度观测（225维）：heights = base_height - measured_heights
     num_scan = scan_points_body.shape[0]
     if config.get('measure_heights', True) and config.get('use_lidar', True) and config.get('lidar_mode') == 'terrain':
-        measured_heights = get_scan_from_terrain(m, d, scan_points_body)
+        # 测试模式：将 measured_heights 全部设为0，这样 heights = base_height - 0 = base_height
+        measured_heights = np.zeros(num_scan, dtype=np.float32)
         heights = (d.qpos[2] - measured_heights).astype(np.float32)
+        print('heights: ', heights)
     else:
         heights = np.zeros(num_scan, dtype=np.float32)
     
@@ -174,6 +183,21 @@ def main():
     d = mujoco.MjData(m)
     m.opt.timestep = config['simulation_dt']
     
+    # 如果是 gap.xml，设置机器人初始位置在第一个平台中心顶部
+    if 'gap.xml' in config['xml_path']:
+        # 平台中心: x=2.5, y=0, 平台顶部: z=0.3, 机器人原始高度: 0.793
+        # 所以 pelvis z = 0.3 + 0.793 = 1.093
+        d.qpos[0] = 1.5  # x 位置：平台中心
+        d.qpos[1] = 0.0  # y 位置：平台中心
+        d.qpos[2] = 1.093  # z 位置：平台顶部 + 机器人高度
+        # 姿态保持默认 (qw=1, qx=0, qy=0, qz=0)
+        d.qpos[3] = 1.0  # qw
+        d.qpos[4] = 0.0  # qx
+        d.qpos[5] = 0.0  # qy
+        d.qpos[6] = 0.0  # qz
+        # 前向一步以应用初始位置
+        mujoco.mj_forward(m, d)
+    
     n_joints = d.qpos.shape[0] - 7
     num_actions = config['num_actions']
     print(f"\n{'='*60}")
@@ -207,17 +231,39 @@ def main():
     
     # 预处理上肢PD参数（避免每次循环都读取）
     n_upper = n_joints - num_actions  # 15个上肢关节
-    upper_body_kps = np.array(config.get('upper_body_kps', [300.0]*n_upper), dtype=np.float32)[:n_upper]
-    upper_body_kds = np.array(config.get('upper_body_kds', [5.0]*n_upper), dtype=np.float32)[:n_upper]
-    upper_body_target = np.array(config.get('upper_body_default_angles', [0.0]*n_upper), dtype=np.float32)[:n_upper]
     
-    # 确保长度正确
-    if len(upper_body_kps) < n_upper:
-        upper_body_kps = np.pad(upper_body_kps, (0, n_upper - len(upper_body_kps)), constant_values=300.0)
-    if len(upper_body_kds) < n_upper:
-        upper_body_kds = np.pad(upper_body_kds, (0, n_upper - len(upper_body_kds)), constant_values=5.0)
-    if len(upper_body_target) < n_upper:
-        upper_body_target = np.pad(upper_body_target, (0, n_upper - len(upper_body_target)), constant_values=0.0)
+    # 处理upper_body_kps：可以是单个数字或数组
+    kps_config = config.get('upper_body_kps', 300.0)
+    if isinstance(kps_config, (int, float)):
+        upper_body_kps = np.full(n_upper, kps_config, dtype=np.float32)
+    else:
+        upper_body_kps = np.array(kps_config, dtype=np.float32)
+        if len(upper_body_kps) < n_upper:
+            upper_body_kps = np.pad(upper_body_kps, (0, n_upper - len(upper_body_kps)), constant_values=300.0)
+        elif len(upper_body_kps) > n_upper:
+            upper_body_kps = upper_body_kps[:n_upper]
+    
+    # 处理upper_body_kds：可以是单个数字或数组
+    kds_config = config.get('upper_body_kds', 5.0)
+    if isinstance(kds_config, (int, float)):
+        upper_body_kds = np.full(n_upper, kds_config, dtype=np.float32)
+    else:
+        upper_body_kds = np.array(kds_config, dtype=np.float32)
+        if len(upper_body_kds) < n_upper:
+            upper_body_kds = np.pad(upper_body_kds, (0, n_upper - len(upper_body_kds)), constant_values=5.0)
+        elif len(upper_body_kds) > n_upper:
+            upper_body_kds = upper_body_kds[:n_upper]
+    
+    # 处理upper_body_target：可以是单个数字或数组
+    target_config = config.get('upper_body_default_angles', 0.0)
+    if isinstance(target_config, (int, float)):
+        upper_body_target = np.full(n_upper, target_config, dtype=np.float32)
+    else:
+        upper_body_target = np.array(target_config, dtype=np.float32)
+        if len(upper_body_target) < n_upper:
+            upper_body_target = np.pad(upper_body_target, (0, n_upper - len(upper_body_target)), constant_values=0.0)
+        elif len(upper_body_target) > n_upper:
+            upper_body_target = upper_body_target[:n_upper]
     
     # 计算总观测维度（修改！）
     # 45(proprio) + 225(scan) + 3(priv_explicit) + 29(priv_latent) + 45*10(history) = 752
@@ -230,6 +276,11 @@ def main():
     print(f"  历史信息: {obs_history_len} × 75 = {obs_history_len * 75} 维")
     print(f"  总观测维度: {total_obs_dim} 维")
     print(f"{'='*60}\n")
+    
+    # 找到机器人根 body (pelvis) 的 ID，用于排除机器人身体（只计算一次）
+    pelvis_bodyid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
+    if pelvis_bodyid < 0:
+        print("警告: 未找到 pelvis body，射线检测可能包含机器人身体")
     
     # 加载策略模型
     print(f"加载策略模型: {config['policy_path']}")
@@ -257,27 +308,14 @@ def main():
             
             # 控制上肢关节（保持在默认位置，与legged_gym的Position模式一致）
             if n_joints > num_actions:
-                # 使用配置文件中的上肢PD参数
-                upper_body_kps = config.get('upper_body_kps', np.full(n_joints-num_actions, 100.0))
-                upper_body_kds = config.get('upper_body_kds', np.full(n_joints-num_actions, 0.5))
-                upper_body_target = config.get('upper_body_default_angles', np.zeros(n_joints-num_actions))
-                
-                # 确保长度匹配
-                n_upper = n_joints - num_actions
-                if len(upper_body_kps) < n_upper:
-                    upper_body_kps = np.pad(upper_body_kps, (0, n_upper - len(upper_body_kps)), constant_values=100.0)
-                if len(upper_body_kds) < n_upper:
-                    upper_body_kds = np.pad(upper_body_kds, (0, n_upper - len(upper_body_kds)), constant_values=0.5)
-                if len(upper_body_target) < n_upper:
-                    upper_body_target = np.pad(upper_body_target, (0, n_upper - len(upper_body_target)), constant_values=0.0)
-                
+                # 使用预处理好的上肢PD参数
                 arm_tau = pd_control(
-                    upper_body_target[:n_upper],
+                    upper_body_target,
                     d.qpos[7+num_actions:7+n_joints],
-                    upper_body_kps[:n_upper],
+                    upper_body_kps,
                     np.zeros(n_upper),
                     d.qvel[6+num_actions:6+n_joints],
-                    upper_body_kds[:n_upper]
+                    upper_body_kds
                 )
                 if d.ctrl.shape[0] > num_actions:
                     d.ctrl[num_actions:] = arm_tau
@@ -288,7 +326,7 @@ def main():
             if counter % config['control_decimation'] == 0:
                 # 计算观测并更新历史
                 debug_flag = (debug_counter < 3)  # 前3次控制周期打印调试信息
-                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, debug=debug_flag)
+                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, pelvis_bodyid, debug=debug_flag)
                 obs_history_buf = np.roll(obs_history_buf, -1, axis=0)
                 obs_history_buf[-1] = proprio_obs
                 
@@ -297,12 +335,11 @@ def main():
                     obs_tensor = torch.from_numpy(full_obs).unsqueeze(0)
                     action = policy(obs_tensor).detach().numpy().squeeze()
                 
-                # 关键修复：强制将后15维（上肢）置为0
-                # 原因：
-                # 1. 训练时上肢是Position模式固定的，理想情况下policy对上肢的输出应该接近0
-                # 2. stage2模型的上肢输出异常大（-131到+106），说明训练时上肢部分没有被正确约束
-                # 3. 虽然观测只用前12维action，但完整的27维action存在于历史中
-                # 4. 为了匹配训练时的行为，将后15维强制置为0
+                # !!关键修复!! 对action进行clipping（与Isaac Gym训练一致）
+                # clip_actions = normalization.clip_actions / control.action_scale = 1.2 / 0.25 = 4.8
+                clip_actions = config.get('clip_actions', 1.2) / config['action_scale']
+                action = np.clip(action, -clip_actions, clip_actions)
+
                 if action.shape[0] > num_actions:
                     action[num_actions:] = 0.0  # 后15维（上肢）强制为0
                 
