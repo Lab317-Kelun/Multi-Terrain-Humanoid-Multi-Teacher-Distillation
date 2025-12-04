@@ -231,6 +231,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         imu_link = "imu_in_pelvis"
         knee_names = ["left_knee_link", "left_hip_yaw_link", "right_knee_link", "right_hip_yaw_link"]
         self_collision = 1
+        collapse_fixed_joints = True  # 合并fixed关节（上肢已改为fixed）
         flip_visual_attachments = False
         ankle_sole_distance = 0.02
 
