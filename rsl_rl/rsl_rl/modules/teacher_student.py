@@ -264,7 +264,30 @@ class MultiStudentTeacher(nn.Module):
                 :class:`OnPolicyRunner` to determine how to load further parameters.
         """
         # Check if state_dict contains teacher and student or just teacher parameters
-        if any("actor" in key for key in state_dict):  # Load parameters from RL training checkpoints
+        # 注意：必须先检查"student"键，因为student.actor_backbone.xxx也包含"actor"字符串
+        # 如果先检查"actor"，会误判蒸馏checkpoint为PPO checkpoint
+        if any("student" in key for key in state_dict):  
+            print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+            # 情况1：从蒸馏训练的checkpoint加载（包含"student."和"teacher."前缀的键）
+            # 同时加载学生网络和教师网络！
+            # super().load_state_dict() 会加载整个MultiStudentTeacher模块，包括：
+            #   - student网络（student.xxx）
+            #   - teacher网络（teacher.xxx）
+            #   - student_obs_normalizer（如果有）
+            #   - teacher_obs_normalizer（如果有）
+            #   - std（动作噪声参数）
+            # 这样加载后，学生和教师网络都被加载到不同的网络结构中，
+            # 后续可以通过 policy.act_inference() 使用学生网络，
+            # 或者通过 policy.evaluate() 使用教师网络
+            super().load_state_dict(state_dict, strict=strict)
+            # Set flag for successfully loading the parameters
+            self.loaded_teacher = True
+            self.teacher.eval()
+            self.teacher_obs_normalizer.eval()
+            return True  # Training resumes
+        elif any("actor." in key for key in state_dict):  
+            # 情况2：从PPO训练的checkpoint加载（包含"actor."前缀的键，注意是"actor."不是"actor"）
+            # 只加载教师网络，因为PPO checkpoint中只有actor网络（作为教师使用）
             # Rename keys to match teacher and remove critic parameters
             teacher_state_dict = {}
             teacher_obs_normalizer_state_dict = {}
@@ -284,12 +307,5 @@ class MultiStudentTeacher(nn.Module):
             self.teacher.eval()
             self.teacher_obs_normalizer.eval()
             return False  # Training does not resume
-        elif any("student" in key for key in state_dict):  # Load parameters from distillation training
-            super().load_state_dict(state_dict, strict=strict)
-            # Set flag for successfully loading the parameters
-            self.loaded_teacher = True
-            self.teacher.eval()
-            self.teacher_obs_normalizer.eval()
-            return True  # Training resumes
         else:
             raise ValueError("state_dict does not contain student or teacher parameters")
