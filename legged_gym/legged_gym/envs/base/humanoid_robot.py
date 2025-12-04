@@ -1011,8 +1011,9 @@ class HumanoidRobot(BaseTask):
             # 获取配置参数
             yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.3)
             
-            # 计算角速度命令
+            # 计算角速度命令,限制在±0.5范围内
             ang_vel_cmd = 0.8 * heading_error
+            ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[:, 2] = torch.where(small_command_mask, 
                                             torch.zeros_like(ang_vel_cmd), 

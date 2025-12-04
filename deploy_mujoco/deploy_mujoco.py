@@ -120,7 +120,13 @@ def compute_proprioceptive_obs(d, config, action, cmd, cur_goal):
     delta_yaw = target_yaw - yaw
     delta_yaw = np.arctan2(np.sin(delta_yaw), np.cos(delta_yaw))
     
-    # 计算位置误差
+    # 根据朝向误差自动计算角速度命令(与训练逻辑一致)
+    ang_vel_cmd = 0.8 * delta_yaw
+    ang_vel_cmd = np.clip(ang_vel_cmd, -0.5, 0.5)  # 限制在±0.5
+
+    cmd[2] = ang_vel_cmd
+    
+    # 计算位置误差(训练时已设为0,这里保持一致)
     delta_pose_x = cur_goal[0] - base_pos[0]
     delta_pose_y = cur_goal[1] - base_pos[1]
     
