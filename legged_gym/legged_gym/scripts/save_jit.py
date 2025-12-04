@@ -84,7 +84,7 @@ def main(args):
     n_priv_explicit = 3
     n_priv_latent = 4 + 1 + 12 + 12  # 29
     num_scan = 225
-    num_actions = 27  # Actor输出27维，但只有前12维用于控制
+    num_actions = 12  # Actor输出27维，但只有前12维用于控制
     history_len = 10
     actor_hidden_dims = [1024, 512, 256, 128]
     scan_encoder_dims = [128, 64, 32]

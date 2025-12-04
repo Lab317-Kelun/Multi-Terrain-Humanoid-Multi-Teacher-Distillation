@@ -1,6 +1,6 @@
 # ========== 路径配置 ==========
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/deploy_mujoco/models/Nov19_19-07-00--stage0_no_onehot-7000-mujoco_jit.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec04_01-56-22--homie_stage2_gap_rew/traced/Dec04_01-56-22--homie_stage2_gap_rew-12000-mujoco_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 # xml_path: "./resources/robots/g1_description/gap.xml"
