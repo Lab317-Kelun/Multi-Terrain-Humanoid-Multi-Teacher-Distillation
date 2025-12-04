@@ -1302,11 +1302,7 @@ class HumanoidRobot(BaseTask):
             local_transform.r = gymapi.Quat.from_euler_zyx(0, np.radians(camera_angle), 0)
             root_handle = self.gym.get_actor_root_rigid_body_handle(env_handle, actor_handle)
 
-            # print("rigid_body_names=",self.gym.get_actor_rigid_body_names(env_handle, actor_handle))
-
-            
             self.gym.attach_camera_to_body(camera_handle, env_handle, root_handle, local_transform, gymapi.FOLLOW_TRANSFORM)
-        # print("rigid_body_names=",self.gym.get_actor_rigid_body_names(env_handle, actor_handle))
 
     def _create_envs(self):
         """ Creates environments:
