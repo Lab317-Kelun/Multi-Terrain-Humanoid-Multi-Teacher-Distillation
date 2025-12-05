@@ -771,8 +771,9 @@ class HumanoidRobot(BaseTask):
         self.delta_yaw = wrap_to_pi(self.commands[:, 3] - self.yaw)
         # self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
         # self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+        self.delta_pose_x = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1, keepdim=True) 
         # self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
-        self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
+        # self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
         self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)            
     
         noisy_delta_yaw = self.get_noisy_measurement(
