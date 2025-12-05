@@ -478,6 +478,7 @@ class HumanoidRobot(BaseTask):
             self.gym.clear_lines(self.viewer)
             self._draw_height_samples()
             self._draw_goals()
+            self._draw_straight_path()  # 绘制理想直线路径
             self._draw_feet()
             if self.cfg.depth.use_camera:
                 window_name = "Depth Image"
@@ -2028,6 +2029,45 @@ class HumanoidRobot(BaseTask):
                     pose_arrow = pose_robot[:2] + 0.2*(i+3) * target_vec_norm[self.lookat_id, :2].cpu().numpy()
                     pose = gymapi.Transform(gymapi.Vec3(pose_arrow[0], pose_arrow[1], pose_robot[2]), r=None)
                     gymutil.draw_lines(sphere_geom_arrow, self.gym, self.viewer, self.envs[self.lookat_id], pose)
+    
+    def _draw_straight_path(self):
+        """
+        可视化从起点到目标的理想直线路径
+        用于调试 velocity_direction 和 lateral_drift 奖励
+        """
+        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
+        if not use_forward_goals:
+            return
+        
+        env_id = self.lookat_id
+        
+        # 获取起点和目标点
+        start_pos = self.goal_start_pos[env_id].cpu().numpy()  # [2]
+        goal_pos = self.cur_goals[env_id, :2].cpu().numpy()    # [2]
+        
+        # 获取高度（使用机器人当前高度或地面高度）
+        z_height = self.root_states[env_id, 2].cpu().item()
+        
+        # 绘制起点（黄色小球）
+        sphere_geom_start = gymutil.WireframeSphereGeometry(0.1, 16, 16, None, color=(1, 1, 0))
+        pose_start = gymapi.Transform(gymapi.Vec3(start_pos[0], start_pos[1], z_height), r=None)
+        gymutil.draw_lines(sphere_geom_start, self.gym, self.viewer, self.envs[env_id], pose_start)
+        
+        # 绘制直线路径（用一系列红色小球连接）
+        sphere_geom_path = gymutil.WireframeSphereGeometry(0.03, 8, 8, None, color=(1, 0, 0))  # 红色
+        num_points = 20  # 路径上的点数
+        for i in range(num_points + 1):
+            t = i / num_points
+            point_x = start_pos[0] + t * (goal_pos[0] - start_pos[0])
+            point_y = start_pos[1] + t * (goal_pos[1] - start_pos[1])
+            pose = gymapi.Transform(gymapi.Vec3(point_x, point_y, z_height), r=None)
+            gymutil.draw_lines(sphere_geom_path, self.gym, self.viewer, self.envs[env_id], pose)
+        
+        # 绘制机器人当前位置（绿色小球）
+        robot_pos = self.root_states[env_id, :2].cpu().numpy()
+        sphere_geom_robot = gymutil.WireframeSphereGeometry(0.08, 16, 16, None, color=(0, 1, 0))
+        pose_robot = gymapi.Transform(gymapi.Vec3(robot_pos[0], robot_pos[1], z_height), r=None)
+        gymutil.draw_lines(sphere_geom_robot, self.gym, self.viewer, self.envs[env_id], pose_robot)
         
     def _draw_feet(self):
         if not hasattr(self, '_foothold_offsets'):
