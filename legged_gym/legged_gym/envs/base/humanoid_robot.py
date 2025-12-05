@@ -2325,3 +2325,6 @@ class HumanoidRobot(BaseTask):
         # 对所有脚求和：-∑_{i=1}^{2} C_i · ∑
         return -torch.sum(contact_float * sum_samples, dim=1)  # [E]
     
+    def _reward_lateral_velocity(self):
+        lateral_vel = torch.abs(self.base_lin_vel[:, 1])  # y方向速度
+        return lateral_vel

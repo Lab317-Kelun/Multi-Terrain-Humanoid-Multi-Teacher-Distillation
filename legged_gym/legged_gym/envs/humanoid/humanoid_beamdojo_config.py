@@ -263,6 +263,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
             
+            lateral_velocity = -1.0
+            
             # reach_goal = 0.0
               
             lin_vel_z = -0.5
@@ -278,7 +280,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_pos_limits = -2.
             feet_air_time = 0.05
             feet_clearance = -0.25
-            feet_distance_lateral = 0.5  
+            feet_distance_lateral = 1.0 #0.5  
             knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
             feet_parallel = -3.0
@@ -325,6 +327,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
+            'lateral_velocity',
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
@@ -365,8 +368,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             gravity = 0.05
             height_measurement = 0.1
             delta_yaw = 0.05
-            delta_pose_x = 0.05
-            delta_pose_y = 0.05
+            delta_pose_x = 0.0
+            delta_pose_y = 0.0
             
     class sim:
         """仿真配置"""
