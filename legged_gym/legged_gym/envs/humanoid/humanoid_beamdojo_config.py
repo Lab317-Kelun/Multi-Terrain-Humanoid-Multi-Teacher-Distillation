@@ -94,7 +94,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # next_goal_threshold 课程学习参数
         next_goal_threshold_curriculum = True  # 是否启用 next_goal_threshold 课程学习
         next_goal_threshold_init = 0.4  # 初始阈值
-        next_goal_threshold_target = 0.1  # 目标阈值
+        next_goal_threshold_target = 0.2  # 目标阈值
         next_goal_threshold_step = 0.001  # 每次成功时降低的步长
         next_goal_threshold_success_rate = 0.7  # 成功率阈值，超过此值才降低阈值
          
@@ -251,7 +251,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = False         # 启用朝向命令模式
         ang_vel_clip = 0.0            # 角速度命令死区阈值
-        lin_vel_clip = 0.1            # 线速度命令死区阈值
+        lin_vel_clip = 0.0            # 线速度命令死区阈值
         
         # 策略1：智能速度生成配置
         height_adaptive_speed = False   # 启用基于高度的自适应速度
@@ -274,6 +274,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             heading_tracking = 1.0
             
             center = 2.0
+            velocity_direction = 2.0  # 新增：速度方向对齐奖励
         
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
@@ -307,7 +308,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still = -0.15
             
             # foothold = 0.05
-            # goal_reached = 10.0 
+            goal_reached = 10.0 
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -331,7 +332,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            "heading_tracking", 
+            "heading_tracking", "velocity_direction",
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             'center',
             "tracking_base_height", 

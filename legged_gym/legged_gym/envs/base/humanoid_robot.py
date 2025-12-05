@@ -770,11 +770,11 @@ class HumanoidRobot(BaseTask):
         # imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         self.delta_yaw = wrap_to_pi(self.commands[:, 3] - self.yaw)
         # self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
-        # self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
-        self.delta_pose_x = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1, keepdim=True) 
-        # self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
+        self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+        self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
         # self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
-        self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)            
+        # self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)
+        # self.delta_pose_x = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)             
     
         noisy_delta_yaw = self.get_noisy_measurement(
             self.delta_yaw, 
@@ -840,7 +840,7 @@ class HumanoidRobot(BaseTask):
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
-                            self.action_history_buf[:, -1, :12], # R^{12}
+                            self.action_history_buf[:, -1, :], # R^{12}
                             # phase_obs,               # R^2 (sin_phase, cos_phase) - 步态相位信息
                             # self.contact_filt.float(), # 2 接触信息
                             ), dim=-1)
@@ -1500,7 +1500,7 @@ class HumanoidRobot(BaseTask):
         self.distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 到目标点的距离（统一计算，避免重复）
         
         # 记录目标点生成时的机器人初始位置（用于直线路径惩罚）
-        self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
+        # self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
         
         # 初始化步态相位相关变量
         self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -2413,26 +2413,15 @@ class HumanoidRobot(BaseTask):
         return reward
             
     def _reward_center(self):
-        """
-        惩罚机器人偏离直线路径
-        计算初始位置到目标点的向量和当前位置到目标点的向量的余弦值
-        如果方向一致（直线路径），cos值接近1；偏离时cos值会变小
-        返回 (1 - cos) 作为惩罚，偏离越大惩罚越大
-        """
         # 初始位置到目标点的向量
         start_to_goal = self.cur_goals[:, :2] - self.goal_start_pos  # [num_envs, 2]
         # 当前位置到目标点的向量
         current_to_goal = self.cur_goals[:, :2] - self.root_states[:, :2]  # [num_envs, 2]
         
-        # 计算两个向量的模长
         norm_start = torch.norm(start_to_goal, dim=1, keepdim=True)  # [num_envs, 1]
         norm_current = torch.norm(current_to_goal, dim=1, keepdim=True)  # [num_envs, 1]
-        
-        # 避免除零错误
         norm_start = torch.clamp(norm_start, min=1e-5)
         norm_current = torch.clamp(norm_current, min=1e-5)
-        
-        # 归一化向量
         start_to_goal_norm = start_to_goal / norm_start  # [num_envs, 2]
         current_to_goal_norm = current_to_goal / norm_current  # [num_envs, 2]
         
@@ -2706,3 +2695,25 @@ class HumanoidRobot(BaseTask):
         # 对所有脚求和：-∑_{i=1}^{2} C_i · ∑
         return -torch.sum(contact_float * sum_samples, dim=1)  # [E]
     
+    def _reward_velocity_direction(self):
+        """
+        确保速度方向与目标方向一致
+        只在朝向第一次对齐后才开始评估
+        """
+        # 没对齐就直接返回0
+        if not self.goal_started_moving.any():
+            return torch.zeros(self.num_envs, device=self.device)
+        
+        # 目标方向
+        target_direction = self.cur_goals[:, :2] - self.root_states[:, :2]
+        target_direction_norm = target_direction / (torch.norm(target_direction, dim=1, keepdim=True) + 1e-5)
+        
+        # 实际速度方向
+        velocity_xy = self.root_states[:, 7:9]
+        velocity_direction = velocity_xy / (torch.norm(velocity_xy, dim=1, keepdim=True) + 1e-5)
+        
+        # 方向对齐度（点积，范围[-1, 1]）
+        alignment = torch.sum(velocity_direction * target_direction_norm, dim=1)
+        
+        # 只对已对齐的环境给奖励
+        return torch.where(self.goal_started_moving, alignment, torch.zeros_like(alignment))
