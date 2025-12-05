@@ -363,8 +363,7 @@ class HumanoidRobot(BaseTask):
                 new_next_goals = self._generate_forward_goal(env_ids_to_update)
                 self.next_goals[env_ids_to_update] = new_next_goals
                 
-                # 记录目标点生成时的机器人初始位置
-                self.goal_start_pos[env_ids_to_update] = self.root_states[env_ids_to_update, :2]
+                # 注意：goal_start_pos 现在在首次对齐时设置，不在这里设置
                 
                 # 重置计时器
                 self.reach_goal_timer[env_ids_to_update] = 0
@@ -453,8 +452,7 @@ class HumanoidRobot(BaseTask):
         if not self.cfg.env.use_forward_goals:
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
-            # 记录目标点生成时的机器人初始位置
-            self.goal_start_pos[env_ids] = self.root_states[env_ids, :2]
+            # 注意：goal_start_pos 现在在首次对齐时设置，不在这里设置
 
         self.update_depth_buffer()
 
@@ -532,7 +530,7 @@ class HumanoidRobot(BaseTask):
         #     self.last_goal_timeout_timer = self.goal_timeout_timer.clone()
 
         self.reset_buf |= self.time_out_buf
-        self.reset_buf |= goal_timeout  # 超时未到达目标也终止
+        # self.reset_buf |= goal_timeout  # 超时未到达目标也终止
         self.reset_buf |= roll_cutoff
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
@@ -638,8 +636,7 @@ class HumanoidRobot(BaseTask):
             new_next_goals = self._generate_forward_goal(env_ids)
             self.cur_goals[env_ids] = new_cur_goals
             self.next_goals[env_ids] = new_next_goals
-            # 记录目标点生成时的机器人初始位置
-            self.goal_start_pos[env_ids] = self.root_states[env_ids, :2]
+            # 注意：goal_start_pos 现在在首次对齐时设置，不在reset时设置
         
         # 在目标设置完成后，重新采样命令
         self._resample_commands(env_ids)
@@ -1029,6 +1026,10 @@ class HumanoidRobot(BaseTask):
             if first_aligned.any():
                 # 首次对齐时,从当前位置计算期望到达时间
                 first_aligned_ids = first_aligned.nonzero(as_tuple=False).flatten()
+                
+                # 关键修改：在首次对齐时设置goal_start_pos（转完角速度后的起点）
+                self.goal_start_pos[first_aligned_ids] = self.root_states[first_aligned_ids, :2]
+                
                 self._update_goal_timeout_from_speed(first_aligned_ids)
                 # 标记已计算,不再重复计算
                 self.need_recalc_timeout[first_aligned_ids] = False
@@ -1412,8 +1413,7 @@ class HumanoidRobot(BaseTask):
         if not use_forward_goals:
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
-            # 记录目标点生成时的机器人初始位置
-            self.goal_start_pos[env_ids] = self.root_states[env_ids, :2]
+            # 注意：goal_start_pos 现在在首次对齐时设置，不在这里设置
         
         # 更新 next_goal_threshold 课程学习（基于成功率，与rsl_rl中的计算方式一致）
         if curriculum_cfg.success_mode == 'goal_reached' and self.next_goal_threshold_curriculum_enabled:
@@ -1896,15 +1896,10 @@ class HumanoidRobot(BaseTask):
             self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
             self.cur_goals = self._gather_cur_goals()
             self.next_goals = self._gather_cur_goals(future=1)
-            # 记录目标点生成时的机器人初始位置（此时root_states还未初始化，使用env_origins）
-            # 如果goal_start_pos还未初始化，先初始化它
+            
+            # 初始化goal_start_pos缓冲区（但不设置具体值，会在首次对齐时设置）
             if not hasattr(self, 'goal_start_pos'):
                 self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
-            # 如果root_states还未初始化，使用env_origins作为初始位置
-            if hasattr(self, 'root_states'):
-                self.goal_start_pos[:] = self.root_states[:, :2]
-            else:
-                self.goal_start_pos[:] = self.env_origins[:, :2]
             
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt
@@ -2453,6 +2448,9 @@ class HumanoidRobot(BaseTask):
         return reward
             
     def _reward_center(self):
+        if not self.goal_started_moving.any():
+            return torch.zeros(self.num_envs, device=self.device)
+        
         # 初始位置到目标点的向量
         start_to_goal = self.cur_goals[:, :2] - self.goal_start_pos  # [num_envs, 2]
         # 当前位置到目标点的向量
@@ -2636,18 +2634,6 @@ class HumanoidRobot(BaseTask):
         return self.reset_buf * ~self.time_out_buf
     
     def _reward_foothold(self):
-        """
-        按照BEAMDOJO论文公式实现
-        公式: -∑_{i=1}^{2} C_i · ∑_{j=1}^{n} 1{dij < ε}
-        
-        说明：
-        - C_i: 第i只脚的接触状态
-        - dij: 第i只脚第j个采样点处的真实地形高度
-        - ε: 高度容忍度（threshold）
-        - 1{dij < ε}: 指示函数（如果地形高度低于阈值则为1，表示踩空）
-        
-        惩罚踩空的情况
-        """
         # 获取脚的接触状态 C_i
         contact_forces = self.contact_forces[:, self.feet_indices, 2]  # [num_envs, n_feet]
         contact_threshold = getattr(self.cfg.rewards, 'contact_force_threshold', 1.0)
