@@ -2697,15 +2697,15 @@ class HumanoidRobot(BaseTask):
     
     def _reward_velocity_direction(self):
         """
-        确保速度方向与目标方向一致
+        确保速度方向与目标方向一致（沿着起点到目标的直线）
         只在朝向第一次对齐后才开始评估
         """
         # 没对齐就直接返回0
         if not self.goal_started_moving.any():
             return torch.zeros(self.num_envs, device=self.device)
         
-        # 目标方向
-        target_direction = self.cur_goals[:, :2] - self.root_states[:, :2]
+        # 目标方向：从起点到目标的方向（固定的直线方向）
+        target_direction = self.cur_goals[:, :2] - self.goal_start_pos
         target_direction_norm = target_direction / (torch.norm(target_direction, dim=1, keepdim=True) + 1e-5)
         
         # 实际速度方向
@@ -2717,6 +2717,31 @@ class HumanoidRobot(BaseTask):
         
         # 只对已对齐的环境给奖励
         return torch.where(self.goal_started_moving, alignment, torch.zeros_like(alignment))
+    
+    def _reward_lateral_drift(self):
+        """
+        惩罚垂直于目标方向的速度分量（侧向漂移）
+        只在朝向第一次对齐后才开始评估
+        """
+        # 没对齐就直接返回0
+        if not self.goal_started_moving.any():
+            return torch.zeros(self.num_envs, device=self.device)
+        
+        # 目标方向（归一化）：从起点到目标的方向（固定的直线方向）
+        target_direction = self.cur_goals[:, :2] - self.goal_start_pos
+        target_direction_norm = target_direction / (torch.norm(target_direction, dim=1, keepdim=True) + 1e-5)
+        
+        # 垂直方向（逆时针旋转90度）: (x, y) -> (-y, x)
+        perpendicular_direction = torch.stack([-target_direction_norm[:, 1], target_direction_norm[:, 0]], dim=1)
+        
+        # 实际速度
+        velocity_xy = self.root_states[:, 7:9]
+        
+        # 计算速度在垂直方向上的投影（侧向速度分量）
+        lateral_velocity = torch.abs(torch.sum(velocity_xy * perpendicular_direction, dim=1))
+        
+        # 只对已对齐的环境给惩罚（返回负值或用torch.square加重惩罚）
+        return torch.where(self.goal_started_moving, lateral_velocity, torch.zeros_like(lateral_velocity))
     
     def _reward_lateral_velocity(self):
         if not self.goal_started_moving.any():

@@ -275,7 +275,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             
             center = 2.0
             velocity_direction = 2.0  # 新增：速度方向对齐奖励
-            lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励
+            # lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励
+            lateral_drift = -2.0  # 新增：侧向漂移惩罚奖励
         
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
@@ -332,11 +333,12 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
 
     class reward_config():
         dense_rewards = [
-            "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
-            "heading_tracking", "velocity_direction",
+            "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel", "heading_tracking", 
+            "velocity_direction",
             'lateral_velocity',
-            "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
+            'lateral_drift',
             'center',
+            "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
             "deviation_knee_joint", "dof_acc", "dof_pos_limits", "feet_air_time",
