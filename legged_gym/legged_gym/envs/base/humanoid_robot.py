@@ -2717,3 +2717,10 @@ class HumanoidRobot(BaseTask):
         
         # 只对已对齐的环境给奖励
         return torch.where(self.goal_started_moving, alignment, torch.zeros_like(alignment))
+    
+    def _reward_lateral_velocity(self):
+        if not self.goal_started_moving.any():
+            return torch.zeros(self.num_envs, device=self.device)
+        
+        lateral_vel = torch.abs(self.base_lin_vel[:, 1])  # y方向速度
+        return lateral_vel
