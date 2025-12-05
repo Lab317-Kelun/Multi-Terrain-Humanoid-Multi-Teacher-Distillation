@@ -491,6 +491,7 @@ class HumanoidRobot(BaseTask):
         if self.cfg.commands.heading_command:
             heading_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
             ang_vel_cmd = 0.8 * heading_error
+            ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
             self.commands[env_ids, 2] = torch.where(small_command_mask, 
                                                     torch.zeros_like(ang_vel_cmd), 
