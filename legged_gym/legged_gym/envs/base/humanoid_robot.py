@@ -653,7 +653,7 @@ class HumanoidRobot(BaseTask):
             target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
             
             heading_error = wrap_to_pi(target_yaw - self.yaw[env_ids])
-            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.3)
+            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.2)
             
             # 初始重置时，如果朝向误差大，先把线速度归0
             heading_aligned = torch.abs(heading_error) < yaw_tolerance
@@ -768,10 +768,10 @@ class HumanoidRobot(BaseTask):
         # imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         self.delta_yaw = wrap_to_pi(self.commands[:, 3] - self.yaw)
         # self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
-        self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
-        self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
-        # self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
-        # self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)
+        # self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+        # self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
+        self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
+        self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)
         # self.delta_pose_x = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)             
     
         noisy_delta_yaw = self.get_noisy_measurement(
@@ -1008,7 +1008,7 @@ class HumanoidRobot(BaseTask):
             heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
             
             # 获取配置参数
-            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.3)
+            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.2)
             
             # 计算角速度命令,限制在±0.5范围内
             ang_vel_cmd = 0.8 * heading_error
