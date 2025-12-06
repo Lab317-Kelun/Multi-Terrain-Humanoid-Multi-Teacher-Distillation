@@ -318,10 +318,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         foothold_foot_length = 0.12
         foothold_foot_width = 0.06
         foothold_height_tolerance = -0.1     
-        
-        foothold_foot_length = 0.12         # 脚长度 [m] 
-        foothold_foot_width = 0.06          # 脚宽度 [m]
-        foothold_height_tolerance = -0.1    # 高度容忍度 [m]
                
     class reward_config():
         dense_rewards = [
