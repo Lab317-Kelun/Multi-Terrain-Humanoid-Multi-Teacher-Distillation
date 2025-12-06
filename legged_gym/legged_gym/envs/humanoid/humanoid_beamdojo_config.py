@@ -275,7 +275,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             
             center = 2.0
             velocity_direction = 2.0  # 新增：速度方向对齐奖励
-            lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励 -5.0
+            # lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励 -5.0
             # lateral_drift = -2.0  # 新增：侧向漂移惩罚奖励
         
             lin_vel_z = -0.5
@@ -310,7 +310,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still = -0.15
             
             # foothold = 0.05
-            # goal_reached = 10.0 
+            goal_reached = 10.0 
             
         only_positive_rewards = False
         tracking_sigma = 0.25

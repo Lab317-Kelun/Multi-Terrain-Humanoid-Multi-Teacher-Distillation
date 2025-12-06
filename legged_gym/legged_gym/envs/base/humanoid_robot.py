@@ -530,7 +530,7 @@ class HumanoidRobot(BaseTask):
         #     self.last_goal_timeout_timer = self.goal_timeout_timer.clone()
 
         self.reset_buf |= self.time_out_buf
-        # self.reset_buf |= goal_timeout  # 超时未到达目标也终止
+        self.reset_buf |= goal_timeout  # 超时未到达目标也终止
         self.reset_buf |= roll_cutoff
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
@@ -1034,17 +1034,64 @@ class HumanoidRobot(BaseTask):
                 # 标记已计算,不再重复计算
                 self.need_recalc_timeout[first_aligned_ids] = False
             
+            # 标记第一次对齐的环境（需要在计算y方向速度之前）
+            just_aligned = heading_aligned & (~self.goal_started_moving)
+            self.goal_started_moving |= just_aligned
+            
+            # 计算 y 方向速度命令（基于偏离起点到目标直线的侧向偏差）
+            # 只在第一次对齐后（goal_started_moving为True）才计算和应用
+            # 初始化 y 方向速度命令为 0
+            y_vel_cmd = torch.zeros(self.num_envs, device=self.device)
+            lateral_offset = torch.zeros(self.num_envs, device=self.device)  # 用于打印
+            
+            # 只对已经开始移动的环境计算侧向偏差
+            if self.goal_started_moving.any():
+                moving_env_mask = self.goal_started_moving
+                
+                # 1. 计算从起点到目标的直线方向向量
+                start_to_goal = self.cur_goals[:, :2] - self.goal_start_pos  # [num_envs, 2]
+                line_length = torch.norm(start_to_goal, dim=1, keepdim=True)  # [num_envs, 1]
+                line_length = torch.clamp(line_length, min=1e-5)  # 避免除零
+                line_dir_normalized = start_to_goal / line_length  # [num_envs, 2] 归一化的直线方向
+                
+                # 2. 计算从起点到机器人当前位置的向量
+                start_to_robot = self.root_states[:, :2] - self.goal_start_pos  # [num_envs, 2]
+                
+                # 3. 计算机器人位置在直线方向上的投影长度
+                proj_length = torch.sum(start_to_robot * line_dir_normalized, dim=1, keepdim=True)  # [num_envs, 1]
+                
+                # 4. 计算机器人位置相对于直线的侧向偏移（垂直距离）
+                # 投影点位置
+                proj_point = self.goal_start_pos + proj_length * line_dir_normalized  # [num_envs, 2]
+                # 从投影点到机器人的向量（这就是侧向偏移向量）
+                lateral_offset_vec = self.root_states[:, :2] - proj_point  # [num_envs, 2]
+                
+                # 5. 计算侧向偏移的方向（垂直于直线的方向）
+                # 直线的垂直方向：逆时针旋转90度 (x, y) -> (-y, x)
+                perpendicular_dir = torch.stack([-line_dir_normalized[:, 1], line_dir_normalized[:, 0]], dim=1)  # [num_envs, 2]
+                
+                # 6. 计算有向侧向偏移（带符号，正负表示在直线的哪一侧）
+                lateral_offset_moving = torch.sum(lateral_offset_vec * perpendicular_dir, dim=1)  # [num_envs]
+                
+                # 7. 根据侧向偏移计算 y 方向速度命令（只对已开始移动的环境）
+                y_vel_gain = getattr(self.cfg.commands, 'y_vel_gain', 0.8)
+                y_vel_max = getattr(self.cfg.commands, 'y_vel_max', 0.5)
+                y_vel_cmd_moving = y_vel_gain * lateral_offset_moving
+                y_vel_cmd_moving = torch.clamp(y_vel_cmd_moving, min=-y_vel_max, max=y_vel_max)
+                
+                # 只更新已开始移动的环境的 y 方向速度和侧向偏差
+                y_vel_cmd = torch.where(moving_env_mask, y_vel_cmd_moving, torch.zeros_like(y_vel_cmd))
+                lateral_offset = torch.where(moving_env_mask, lateral_offset_moving, torch.zeros_like(lateral_offset))
+            
             # 设置线速度命令
             self.commands[:, 0] = torch.where(heading_aligned, 
                                             self.original_lin_vel_cmd[:, 0],
                                             torch.zeros_like(self.commands[:, 0]))
-            self.commands[:, 1] = torch.where(heading_aligned, 
-                                            self.original_lin_vel_cmd[:, 1],
+            # y 方向速度：只在第一次对齐后（goal_started_moving为True），根据偏离起点到目标直线的侧向偏差计算
+            # 和 x 方向速度一样，只在 goal_started_moving 为 True 时应用
+            self.commands[:, 1] = torch.where(self.goal_started_moving, 
+                                            y_vel_cmd,  # 使用根据偏离直线计算的 y 方向速度
                                             torch.zeros_like(self.commands[:, 1]))
-            
-            # 标记第一次对齐的环境
-            just_aligned = heading_aligned & (~self.goal_started_moving)
-            self.goal_started_moving |= just_aligned
             
             # 从第一次对齐后就持续累积计时器(无论之后是否偏离)
             self.goal_timeout_timer += torch.where(self.goal_started_moving, 
@@ -1057,6 +1104,7 @@ class HumanoidRobot(BaseTask):
                   f"原始速度: x={self.original_lin_vel_cmd[env_id, 0].item():5.2f} y={self.original_lin_vel_cmd[env_id, 1].item():5.2f} | "
                   f"当前速度: x={self.commands[env_id, 0].item():5.2f} y={self.commands[env_id, 1].item():5.2f} | "
                   f"角速度: {self.commands[env_id, 2].item():6.3f} | "
+                  f"侧向偏差: {lateral_offset[env_id].item():6.3f} | "
                   f"朝向误差: {np.degrees(heading_error[env_id].item()):6.1f}° | "
                   f"状态: {'✓对齐' if heading_aligned[env_id] else '✗转向'} | "
                   f"线速度计时: {self.goal_timeout_timer[env_id].item():5.2f}s/{self.goal_timeout_duration[env_id].item():5.2f}s")
