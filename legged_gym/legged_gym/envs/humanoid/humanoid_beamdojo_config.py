@@ -94,7 +94,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # next_goal_threshold 课程学习参数
         next_goal_threshold_curriculum = True  # 是否启用 next_goal_threshold 课程学习
         next_goal_threshold_init = 0.4  # 初始阈值
-        next_goal_threshold_target = 0.2  # 目标阈值
+        next_goal_threshold_target = 0.1  # 目标阈值
         next_goal_threshold_step = 0.001  # 每次成功时降低的步长
         next_goal_threshold_success_rate = 0.7  # 成功率阈值，超过此值才降低阈值
          
@@ -274,9 +274,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             heading_tracking = 1.0
             
             center = 2.0
-            velocity_direction = 2.0  # 新增：速度方向对齐奖励
+            # velocity_direction = 2.0  # 新增：速度方向对齐奖励
             # lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励 -5.0
-            # lateral_drift = -2.0  # 新增：侧向漂移惩罚奖励
+            lateral_drift = -2.0  #
         
             lin_vel_z = -0.5
             ang_vel_xy = -0.025

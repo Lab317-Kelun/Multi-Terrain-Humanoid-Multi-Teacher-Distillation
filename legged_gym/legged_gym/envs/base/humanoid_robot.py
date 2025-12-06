@@ -768,10 +768,10 @@ class HumanoidRobot(BaseTask):
         # imu_obs = torch.stack((self.roll, self.pitch), dim=1)
         self.delta_yaw = wrap_to_pi(self.commands[:, 3] - self.yaw)
         # self.delta_next_yaw = wrap_to_pi(self.next_target_yaw - self.yaw)
-        # self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
-        # self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
-        self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
-        self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)
+        self.delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+        self.delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
+        # self.delta_pose_x = torch.zeros(self.num_envs, device=self.device)
+        # self.delta_pose_y = torch.zeros(self.num_envs, device=self.device)
         # self.delta_pose_x = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)             
     
         noisy_delta_yaw = self.get_noisy_measurement(
@@ -2794,28 +2794,37 @@ class HumanoidRobot(BaseTask):
     
     def _reward_lateral_drift(self):
         """
-        惩罚垂直于目标方向的速度分量（侧向漂移）
+        惩罚机器人相对于目标直线的侧向位置偏移（基于位置，不是速度）
+        直接读取机器人位置，计算偏离直线的距离
         只在朝向第一次对齐后才开始评估
         """
         # 没对齐就直接返回0
         if not self.goal_started_moving.any():
             return torch.zeros(self.num_envs, device=self.device)
         
-        # 目标方向（归一化）：从起点到目标的方向（固定的直线方向）
-        target_direction = self.cur_goals[:, :2] - self.goal_start_pos
-        target_direction_norm = target_direction / (torch.norm(target_direction, dim=1, keepdim=True) + 1e-5)
+        # 1. 计算从起点到目标的直线方向向量
+        start_to_goal = self.cur_goals[:, :2] - self.goal_start_pos  # [num_envs, 2]
+        line_length = torch.norm(start_to_goal, dim=1, keepdim=True)  # [num_envs, 1]
+        line_length = torch.clamp(line_length, min=1e-5)  # 避免除零
+        line_dir_normalized = start_to_goal / line_length  # [num_envs, 2] 归一化的直线方向
         
-        # 垂直方向（逆时针旋转90度）: (x, y) -> (-y, x)
-        perpendicular_direction = torch.stack([-target_direction_norm[:, 1], target_direction_norm[:, 0]], dim=1)
+        # 2. 计算从起点到机器人当前位置的向量（直接读取位置）
+        start_to_robot = self.root_states[:, :2] - self.goal_start_pos  # [num_envs, 2]
         
-        # 实际速度
-        velocity_xy = self.root_states[:, 7:9]
+        # 3. 计算机器人位置在直线方向上的投影长度
+        proj_length = torch.sum(start_to_robot * line_dir_normalized, dim=1, keepdim=True)  # [num_envs, 1]
         
-        # 计算速度在垂直方向上的投影（侧向速度分量）
-        lateral_velocity = torch.abs(torch.sum(velocity_xy * perpendicular_direction, dim=1))
+        # 4. 计算机器人位置相对于直线的侧向偏移（垂直距离）
+        # 投影点位置
+        proj_point = self.goal_start_pos + proj_length * line_dir_normalized  # [num_envs, 2]
+        # 从投影点到机器人的向量（这就是侧向偏移向量）
+        lateral_offset_vec = self.root_states[:, :2] - proj_point  # [num_envs, 2]
         
-        # 只对已对齐的环境给惩罚（返回负值或用torch.square加重惩罚）
-        return torch.where(self.goal_started_moving, lateral_velocity, torch.zeros_like(lateral_velocity))
+        # 5. 计算侧向偏移的绝对值（距离直线的距离）
+        lateral_offset = torch.norm(lateral_offset_vec, dim=1)  # [num_envs]
+        
+        # 只对已对齐的环境给惩罚（返回偏移距离，用于惩罚）
+        return torch.where(self.goal_started_moving, lateral_offset, torch.zeros_like(lateral_offset))
     
     def _reward_lateral_velocity(self):
         if not self.goal_started_moving.any():
