@@ -269,13 +269,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """BEAMDOJO奖励配置"""
         class scales:
             tracking_x_vel = 1.5
-            tracking_y_vel = 1.
+            tracking_y_vel = 1.0 #2.0
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
             
             center = 2.0
             velocity_direction = 2.0  # 新增：速度方向对齐奖励
-            lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励
+            lateral_velocity = -2.0  # 新增：侧向速度惩罚奖励 -5.0
             # lateral_drift = -2.0  # 新增：侧向漂移惩罚奖励
         
             lin_vel_z = -0.5

@@ -1,5 +1,5 @@
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec04_19-02-43--homie_stage1_navigation_pose/traced/Dec04_19-02-43--homie_stage1_navigation_pose-200-mujoco_jit.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec05_22-03-15--velocity_direction+lateral_velocity/traced/Dec05_22-03-15--velocity_direction+lateral_velocity-1600-mujoco_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 
@@ -13,7 +13,7 @@ scan_range: 0.7          # 扫描范围（米）：[-0.7, 0.7]
 scan_resolution: 15      # 扫描分辨率：15×15网格（共225个点）
 
 # ========== 仿真配置 ==========
-simulation_duration: 60.0    # 仿真持续时间（秒）
+simulation_duration: 600.0    # 仿真持续时间（秒），3600秒=1小时
 simulation_dt: 0.002         # 仿真时间步长（秒），对应500Hz仿真频率
 # 注意：训练时 sim.dt = 0.005 (200Hz)，部署时使用 0.002 (500Hz)
 # 这是正常的，因为MuJoCo部署可以使用不同的时间步长
@@ -56,10 +56,13 @@ cmd_init: [0.5, 0, 0]   # 初始速度指令：[vx, vy, vyaw] (m/s, m/s, rad/s)
 
 # ========== 目标点配置 ==========
 # 初始目标点位置 [x, y, z] (米)，相对于世界坐标系原点
-goal_init: [2.0, 2.0, 0.78]
+goal_init: [1.0, 1.0, 0.78]
 # 到达目标的距离阈值（米），小于此距离认为到达目标
-goal_reach_threshold: 0.5
+goal_reach_threshold: 0.2
 # 是否启用动态目标更新（到达目标后自动生成新目标）
 goal_dynamic_update: true
 # 动态更新时，新目标在机器人前方的距离范围 [min, max] (米)
-goal_forward_distance_range: [1.5, 3.0]
+goal_forward_distance_range: [1.0, 2.0]
+# 动态更新时，新目标相对于当前朝向的角度范围 [min, max] (弧度)
+# 例如: [-1.57, 1.57] 表示前方±90度, [-3.14, 3.14] 表示全方向
+goal_angle_range: [-1.57, 1.57]  # 前方±90度（-π/2 到 π/2）

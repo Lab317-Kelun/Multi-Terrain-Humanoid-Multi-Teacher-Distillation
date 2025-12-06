@@ -337,6 +337,72 @@
         </body>
       </body>
     </body>
+    
+    <!-- 可视化标记：用于显示目标点和路径 -->
+    <!-- 起点标记（黄色） -->
+    <body name="viz_start" mocap="true" pos="0 0 0.8">
+      <geom name="viz_start_geom" type="sphere" size="0.1" rgba="1 1 0 0.8" contype="0" conaffinity="0"/>
+    </body>
+    
+    <!-- 目标点标记（蓝色） -->
+    <body name="viz_goal" mocap="true" pos="2 0 0.8">
+      <geom name="viz_goal_geom" type="sphere" size="0.15" rgba="0 0.5 1 0.9" contype="0" conaffinity="0"/>
+    </body>
+    
+    <!-- 机器人当前位置标记（绿色） -->
+    <body name="viz_robot" mocap="true" pos="0 0 0.8">
+      <geom name="viz_robot_geom" type="sphere" size="0.08" rgba="0 1 0 0.8" contype="0" conaffinity="0"/>
+    </body>
+    
+    <!-- 路径点标记（红色，15个） -->
+    <body name="viz_path_0" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_0" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_1" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_1" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_2" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_2" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_3" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_3" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_4" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_4" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_5" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_5" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_6" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_6" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_7" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_7" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_8" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_8" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_9" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_9" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_10" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_10" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_11" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_11" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_12" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_12" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_13" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_13" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_14" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_14" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
+    <body name="viz_path_15" mocap="true" pos="0 0 0.8">
+      <geom name="viz_path_geom_15" type="sphere" size="0.03" rgba="1 0 0 0.6" contype="0" conaffinity="0"/>
+    </body>
   </worldbody>
 
   <actuator>
