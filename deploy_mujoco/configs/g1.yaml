@@ -1,5 +1,5 @@
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec06_20-35-47--homie_stage1_navigation_reach_lateral_pose_reset/traced/Dec06_20-35-47--homie_stage1_navigation_reach_lateral_pose_reset-600-mujoco_jit.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec06_20-35-47--homie_stage1_navigation_reach_lateral_pose_reset/traced/Dec06_20-35-47--homie_stage1_navigation_reach_lateral_pose_reset-11000-mujoco_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 

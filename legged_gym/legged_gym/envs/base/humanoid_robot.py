@@ -275,12 +275,12 @@ class HumanoidRobot(BaseTask):
 
     def _generate_forward_goal(self, env_ids):
         """
-        在机器人前方扇形区域内生成随机目标点（新增功能）
+        在机器人周围360度范围内生成随机目标点（正前方0度，左右各180度，可全方向掉头转弯）
         """
         # 获取配置参数，如果没有设置则使用默认值
         min_distance = getattr(self.cfg.env, 'goal_min_distance', 1.0)  # 最小距离（米）
         max_distance = getattr(self.cfg.env, 'goal_max_distance', 4.0)  # 最大距离（米）
-        angle_range = getattr(self.cfg.env, 'goal_angle_range', 90.0)  # 角度范围（度），前方±60度
+        angle_range = getattr(self.cfg.env, 'goal_angle_range', 180.0)  # 角度范围（度），左右各180度（覆盖360度全方向）
         
         num_envs = len(env_ids)
         
@@ -291,9 +291,10 @@ class HumanoidRobot(BaseTask):
         # 随机生成距离和角度
         distances = torch_rand_float(min_distance, max_distance, (num_envs, 1), device=self.device).squeeze(1)
         angle_range_rad = np.radians(angle_range)
+        # 角度范围从-180度到+180度（相对于机器人朝向），0度是正前方，±180度是正后方
         angles = torch_rand_float(-angle_range_rad, angle_range_rad, (num_envs, 1), device=self.device).squeeze(1)
         
-        # 相对于机器人朝向的角度（确保在前方）
+        # 相对于机器人朝向的角度（0度=正前方，±180度=正后方，支持全方向掉头转弯）
         target_angles = robot_yaw + angles
         
         # 计算目标位置（世界坐标系）
@@ -653,7 +654,7 @@ class HumanoidRobot(BaseTask):
             target_yaw = torch.atan2(target_vec_norm[:, 1], target_vec_norm[:, 0])
             
             heading_error = wrap_to_pi(target_yaw - self.yaw[env_ids])
-            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.2)
+            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.15)
             
             # 初始重置时，如果朝向误差大，先把线速度归0
             heading_aligned = torch.abs(heading_error) < yaw_tolerance
@@ -1008,7 +1009,7 @@ class HumanoidRobot(BaseTask):
             heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
             
             # 获取配置参数
-            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.2)
+            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.15)
             
             # 计算角速度命令,限制在±0.5范围内
             ang_vel_cmd = 0.8 * heading_error
