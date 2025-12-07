@@ -301,29 +301,11 @@ class HumanoidRobot(BaseTask):
         goal_x = robot_pos[:, 0] + distances * torch.cos(target_angles)
         goal_y = robot_pos[:, 1] + distances * torch.sin(target_angles)
         
-        # 检查目标是否在地形边界内，如果超出则调整
-        if hasattr(self, 'terrain') and self.terrain is not None:
-            length = self.cfg.terrain.terrain_length - 0.2
-            width = self.cfg.terrain.terrain_width - 0.2
-            env_origins_xy = self.env_origins[env_ids, :2]
-            
-            # 相对于环境原点的位置
-            relative_x = goal_x - env_origins_xy[:, 0]
-            relative_y = goal_y - env_origins_xy[:, 1]
-            
-            # 限制在边界内
-            relative_x = torch.clamp(relative_x, -length, length)
-            relative_y = torch.clamp(relative_y, -width, width)
-            
-            goal_x = env_origins_xy[:, 0] + relative_x
-            goal_y = env_origins_xy[:, 1] + relative_y
-        
         # 获取目标点的高度（从地形采样）
         if hasattr(self, 'height_samples') and self.height_samples is not None:
             # 转换为网格索引
             goal_points = torch.stack([goal_x, goal_y], dim=1)  # [num_envs, 2]
-            goal_points_grid = goal_points + self.terrain.cfg.border_size
-            goal_points_grid = (goal_points_grid / self.terrain.cfg.horizontal_scale).long()
+            goal_points_grid = (goal_points / self.terrain.cfg.horizontal_scale).long()
             
             px = torch.clip(goal_points_grid[:, 0], 0, self.height_samples.shape[0]-2)
             py = torch.clip(goal_points_grid[:, 1], 0, self.height_samples.shape[1]-2)
@@ -497,14 +479,6 @@ class HumanoidRobot(BaseTask):
         roll_cutoff = torch.abs(self.roll) > 0.8
         pitch_cutoff = torch.abs(self.pitch) > 0.8
         height_cutoff = self.root_states[:, 2] < 0.5
-        
-        # 检查机器人是否超出地形边界
-        length = self.cfg.terrain.terrain_length- 0.2
-        width = self.cfg.terrain.terrain_width - 0.2
-        relative_pos = self.root_states[:, :2] - self.env_origins[:, :2]
-        x_out_of_bounds = (relative_pos[:, 0] < -length) | (relative_pos[:, 0] > length) 
-        y_out_of_bounds = (relative_pos[:, 1] < -width) | (relative_pos[:, 1] > width)
-        boundary_cutoff = x_out_of_bounds | y_out_of_bounds
 
         if self.cfg.env.use_forward_goals:
             # 前方目标模式：使用配置中设置的目标数量
@@ -536,8 +510,6 @@ class HumanoidRobot(BaseTask):
         self.reset_buf |= reach_goal_cutoff
         self.reset_buf |= pitch_cutoff
         self.reset_buf |= height_cutoff
-        self.reset_buf |= boundary_cutoff  # 超出地形边界也终止
-        # self.reset_buf |= became_unaligned  # 从对齐变为未对齐也终止
 
         self.total_times += len(self.reset_buf.nonzero(as_tuple=False).flatten())
         self.success_times += len(reach_goal_cutoff.nonzero(as_tuple=False).flatten())
@@ -561,6 +533,9 @@ class HumanoidRobot(BaseTask):
         """
         if len(env_ids) == 0:
             return
+        
+        # 更新目标阈值课程学习
+        self._update_goal_threshold_curriculum()
         
         if self.save:
             for env_id in env_ids:
@@ -601,10 +576,6 @@ class HumanoidRobot(BaseTask):
                 except Exception as e:
                     print(f"An error occured when saving env {env_id}: {str(e)}")
         
-        # update curriculum
-        if self.cfg.terrain.curriculum:
-            self._update_terrain_curriculum(env_ids)
-
         # reset robot states
         self._reset_dofs(env_ids)
         self._reset_root_states(env_ids)
@@ -685,8 +656,6 @@ class HumanoidRobot(BaseTask):
         self.episode_length_buf[env_ids] = 0
 
         # log additional curriculum info
-        if self.cfg.terrain.curriculum:
-            self.extras["episode"]["terrain_level"] = torch.mean(self.terrain_levels.float())
         if self.cfg.commands.curriculum:
             self.extras["episode"]["max_command_x"] = self.command_ranges["lin_vel_x"][1]
         # send timeout info to the algorithm
@@ -1344,25 +1313,20 @@ class HumanoidRobot(BaseTask):
             env_ids (List[int]): Environemnt ids
         """
         # base position
-        if self.custom_origins:
-            self.root_states[env_ids] = self.base_init_state
-            self.root_states[env_ids, :3] += self.env_origins[env_ids]
-            if self.cfg.env.randomize_start_pos:
-                self.root_states[env_ids, :2] += torch_rand_float(-0.3, 0.3, (len(env_ids), 2), device=self.device) # xy position within 1m of the center
-            if self.cfg.env.randomize_start_yaw:
-                rand_yaw = self.cfg.env.rand_yaw_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
-                if self.cfg.env.randomize_start_pitch:
-                    rand_pitch = self.cfg.env.rand_pitch_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
-                else:
-                    rand_pitch = torch.zeros(len(env_ids), device=self.device)
-                quat = quat_from_euler_xyz(0*rand_yaw, rand_pitch, rand_yaw) 
-                self.root_states[env_ids, 3:7] = quat[:, :]  
-            if self.cfg.env.randomize_start_y:
-                self.root_states[env_ids, 1] += self.cfg.env.rand_y_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
-            
-        else:
-            self.root_states[env_ids] = self.base_init_state
-            self.root_states[env_ids, :3] += self.env_origins[env_ids]
+        self.root_states[env_ids] = self.base_init_state
+        self.root_states[env_ids, :3] += self.env_origins[env_ids]
+        if self.cfg.env.randomize_start_pos:
+            self.root_states[env_ids, :2] += torch_rand_float(-0.3, 0.3, (len(env_ids), 2), device=self.device)
+        if self.cfg.env.randomize_start_yaw:
+            rand_yaw = self.cfg.env.rand_yaw_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
+            if self.cfg.env.randomize_start_pitch:
+                rand_pitch = self.cfg.env.rand_pitch_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
+            else:
+                rand_pitch = torch.zeros(len(env_ids), device=self.device)
+            quat = quat_from_euler_xyz(0*rand_yaw, rand_pitch, rand_yaw) 
+            self.root_states[env_ids, 3:7] = quat[:, :]  
+        if self.cfg.env.randomize_start_y:
+            self.root_states[env_ids, 1] += self.cfg.env.rand_y_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_states),
@@ -1375,97 +1339,20 @@ class HumanoidRobot(BaseTask):
         self.root_states[:, 7:9] = torch_rand_float(-max_vel, max_vel, (self.num_envs, 2), device=self.device) # lin vel x/y
         self.gym.set_actor_root_state_tensor(self.sim, gymtorch.unwrap_tensor(self.root_states))
 
-    def _update_terrain_curriculum(self, env_ids):
+    def _update_goal_threshold_curriculum(self):
+        """更新目标到达阈值课程学习（保留）"""
         if not self.init_done:
             return
         
-        # 初始化环境级别的连续成功/失败计数器
-        if not hasattr(self, 'env_consecutive_success'):
-            self.env_consecutive_success = torch.zeros(self.num_envs, dtype=torch.int, device=self.device)
-            self.env_consecutive_failure = torch.zeros(self.num_envs, dtype=torch.int, device=self.device)
+        # 检查是否启用了目标阈值课程学习
+        if not self.next_goal_threshold_curriculum_enabled:
+            return
         
         # 获取课程学习配置
         curriculum_cfg = self.cfg.curriculum_config
         
-        # 检查每个需要重置的环境
-        for env_id in env_ids:
-            env_id = env_id.item()
-            
-            # 根据配置判断成功模式
-            if curriculum_cfg.success_mode == 'goal_reached':
-                # 目标到达模式：判断是否到达所有目标点
-                # 检查是否使用前方目标模式
-                use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
-                if use_forward_goals:
-                    # 前方目标模式：使用配置中设置的目标数量
-                    num_goals = getattr(self.cfg.env, 'num_goals', None)
-                    if num_goals is None:
-                        num_goals = getattr(self.cfg.terrain, 'num_goals', 10)
-                    is_success = self.cur_goal_idx[env_id] >= num_goals
-                else:
-                    # 原有逻辑：使用地形配置中的目标数量
-                    is_success = self.cur_goal_idx[env_id] >= self.cfg.terrain.num_goals
-                success_threshold = curriculum_cfg.success_threshold
-                failure_threshold = curriculum_cfg.failure_threshold
-                
-            elif curriculum_cfg.success_mode == 'survival_time':
-                # 存活时间模式：判断是否存活超过指定时间
-                episode_time = self.episode_length_buf[env_id] * self.dt
-                # print(f"episode_time: {episode_time}")
-                is_success = episode_time >= curriculum_cfg.survival_time_threshold
-                success_threshold = curriculum_cfg.survival_success_threshold
-                failure_threshold = curriculum_cfg.survival_failure_threshold
-            
-            elif curriculum_cfg.success_mode == 'vel_tracking':
-                # 速度模式：判断是否达到指定速度
-                is_success = (self.episode_sums["tracking_x_vel"][env_id] / self.max_episode_length) > (0.6 * self.reward_scales["tracking_x_vel"])
-                success_threshold = curriculum_cfg.velocity_success_threshold
-                failure_threshold = curriculum_cfg.velocity_failure_threshold
-            
-            if is_success:
-                # 成功：增加连续成功计数，重置连续失败计数
-                self.env_consecutive_success[env_id] += 1
-                self.env_consecutive_failure[env_id] = 0
-                
-                # 检查是否达到升级条件
-                if self.env_consecutive_success[env_id] >= success_threshold:
-                    self.terrain_levels[env_id] += 1
-                    self.env_consecutive_success[env_id] = 0  # 重置计数器
-                    # print(f"环境 {env_id} 连续成功{success_threshold}次，升级到等级 {self.terrain_levels[env_id]}")
-            else:
-                # 失败：增加连续失败计数，重置连续成功计数
-                self.env_consecutive_failure[env_id] += 1
-                self.env_consecutive_success[env_id] = 0
-                
-                # 检查是否达到降级条件
-                if self.env_consecutive_failure[env_id] >= failure_threshold:
-                    self.terrain_levels[env_id] -= 1
-                    self.env_consecutive_failure[env_id] = 0  # 重置计数器
-                    # print(f"环境 {env_id} 连续失败{failure_threshold}次，降级到等级 {self.terrain_levels[env_id]}")
-        
-        # 保持难度在合理范围
-        self.terrain_levels[env_ids] = torch.where(
-            self.terrain_levels[env_ids] >= self.max_terrain_level,
-            torch.randint_like(self.terrain_levels[env_ids], self.max_terrain_level),
-            torch.clip(self.terrain_levels[env_ids], 0)
-        )
-        
-        # 更新环境类别和目标
-        self.env_class[env_ids] = self.terrain_class[self.terrain_levels[env_ids], self.terrain_types[env_ids]]
-        self.env_origins[env_ids] = self.terrain_origins[self.terrain_levels[env_ids], self.terrain_types[env_ids]]
-        
-        temp = self.terrain_goals[self.terrain_levels, self.terrain_types]
-        last_col = temp[:, -1].unsqueeze(1)
-        self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
-        # 只有在使用原有目标模式时才更新（前方目标模式会动态生成）
-        use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
-        if not use_forward_goals:
-            self.cur_goals = self._gather_cur_goals()
-            self.next_goals = self._gather_cur_goals(future=1)
-            # 注意：goal_start_pos 现在在首次对齐时设置，不在这里设置
-        
-        # 更新 next_goal_threshold 课程学习（基于成功率，与rsl_rl中的计算方式一致）
-        if curriculum_cfg.success_mode == 'goal_reached' and self.next_goal_threshold_curriculum_enabled:
+        # 更新 next_goal_threshold 课程学习（基于成功率）
+        if curriculum_cfg.success_mode == 'goal_reached':
             if self.total_times > 0:
                 current_success_rate = self.success_times / self.total_times
                 # 成功率 < 0.7：阈值固定为 0.5
@@ -1685,20 +1572,24 @@ class HumanoidRobot(BaseTask):
 
     def _create_trimesh(self):
         """ Adds a triangle mesh terrain to the simulation, sets parameters based on the cfg.
-            Very slow when horizontal_scale is small
         """
         tm_params = gymapi.TriangleMeshParams()
         tm_params.nb_vertices = self.terrain.vertices.shape[0]
         tm_params.nb_triangles = self.terrain.triangles.shape[0]
-        tm_params.transform.p.x = -self.terrain.cfg.border_size 
-        tm_params.transform.p.y = -self.terrain.cfg.border_size
+        
+        # PLY模式：不需要border_size偏移，mesh已经包含了正确的位置
+        tm_params.transform.p.x = 0.0
+        tm_params.transform.p.y = 0.0
         tm_params.transform.p.z = 0.0
+        
         tm_params.static_friction = torch_rand_float(self.cfg.terrain.static_friction[0], self.cfg.terrain.static_friction[1], (1, 1), device=self.device).item()
         tm_params.dynamic_friction = torch_rand_float(self.cfg.terrain.dynamic_friction[0], self.cfg.terrain.dynamic_friction[1], (1, 1), device=self.device).item()
         tm_params.restitution = torch_rand_float(self.cfg.terrain.restitution[0], self.cfg.terrain.restitution[1], (1, 1), device=self.device).item()
+        
         print("Adding trimesh to simulation...")
         self.gym.add_triangle_mesh(self.sim, self.terrain.vertices.flatten(order='C'), self.terrain.triangles.flatten(order='C'), tm_params)  
         print("Trimesh added")
+        
         self.height_samples = torch.tensor(self.terrain.heightsamples).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
         self.x_edge_mask = torch.tensor(self.terrain.x_edge_mask).view(self.terrain.tot_rows, self.terrain.tot_cols).to(self.device)
 
@@ -1907,48 +1798,31 @@ class HumanoidRobot(BaseTask):
         self.imu_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], self.cfg.asset.imu_link)
 
     def _get_env_origins(self):
-        """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
-            Otherwise create a grid.
-        """
-        if terrain_config.mesh_type == "None":
-            self.custom_origins = False
-            self.env_origins = torch.zeros(self.num_envs, 3, device=self.device, requires_grad=False)
-            # create a grid of robots
-            num_cols = np.floor(np.sqrt(self.num_envs))
-            num_rows = np.ceil(self.num_envs / num_cols)
-            xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols))
-            spacing = self.cfg.env.env_spacing
-            self.env_origins[:, 0] = spacing * xx.flatten()[:self.num_envs]
-            self.env_origins[:, 1] = spacing * yy.flatten()[:self.num_envs]
-            self.env_origins[:, 2] = 0.
-        else:
-            self.custom_origins = True
-            self.env_origins = torch.zeros(self.num_envs, 3, device=self.device, requires_grad=False)
-            self.env_class = torch.zeros(self.num_envs, device=self.device, requires_grad=False)
-            # put robots at the origins defined by the terrain
-            max_init_level = self.cfg.terrain.max_init_terrain_level # 2
-            if not self.cfg.terrain.curriculum: max_init_level = self.cfg.terrain.num_rows - 1
-            self.terrain_levels = torch.randint(0, max_init_level+1, (self.num_envs,), device=self.device)
-            self.terrain_types = torch.div(torch.arange(self.num_envs, device=self.device), (self.num_envs/self.cfg.terrain.num_cols), rounding_mode='floor').to(torch.long)
-            self.max_terrain_level = self.cfg.terrain.num_rows
-            self.terrain_origins = torch.from_numpy(self.terrain.env_origins).to(self.device).to(torch.float)
-
-            self.env_origins[:] = self.terrain_origins[self.terrain_levels, self.terrain_types]
-            self.terrain_class = torch.from_numpy(self.terrain.terrain_type).to(self.device).to(torch.float)
-            self.env_class[:] = self.terrain_class[self.terrain_levels, self.terrain_types]
-
-            self.terrain_goals = torch.from_numpy(self.terrain.goals).to(self.device).to(torch.float)
-            self.env_goals = torch.zeros(self.num_envs, self.cfg.terrain.num_goals + self.cfg.env.num_future_goal_obs, 3, device=self.device, requires_grad=False)
-            self.cur_goal_idx = torch.zeros(self.num_envs, device=self.device, requires_grad=False, dtype=torch.long)
-            temp = self.terrain_goals[self.terrain_levels, self.terrain_types]
-            last_col = temp[:, -1].unsqueeze(1)
-            self.env_goals[:] = torch.cat((temp, last_col.repeat(1, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
-            self.cur_goals = self._gather_cur_goals()
-            self.next_goals = self._gather_cur_goals(future=1)
-            
-            # 初始化goal_start_pos缓冲区（但不设置具体值，会在首次对齐时设置）
-            if not hasattr(self, 'goal_start_pos'):
-                self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
+        """设置环境原点，使用网格布局"""
+        self.env_origins = torch.zeros(self.num_envs, 3, device=self.device, requires_grad=False)
+        
+        # 创建机器人网格布局
+        num_cols = np.floor(np.sqrt(self.num_envs))
+        num_rows = np.ceil(self.num_envs / num_cols)
+        xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols))
+        spacing = self.cfg.env.env_spacing
+        self.env_origins[:, 0] = spacing * xx.flatten()[:self.num_envs]
+        self.env_origins[:, 1] = spacing * yy.flatten()[:self.num_envs]
+        self.env_origins[:, 2] = 0.
+        
+        # 设置goals（使用默认值）
+        self.terrain_goals = torch.from_numpy(self.terrain.goals).to(self.device).to(torch.float)
+        self.env_goals = torch.zeros(self.num_envs, self.cfg.terrain.num_goals + self.cfg.env.num_future_goal_obs, 3, device=self.device, requires_grad=False)
+        self.cur_goal_idx = torch.zeros(self.num_envs, device=self.device, requires_grad=False, dtype=torch.long)
+        temp = self.terrain_goals[0, 0]  # PLY模式使用单一地形
+        last_col = temp[-1].unsqueeze(0)
+        self.env_goals[:] = torch.cat((temp.unsqueeze(0).repeat(self.num_envs, 1, 1), last_col.repeat(self.num_envs, self.cfg.env.num_future_goal_obs, 1)), dim=1)[:]
+        self.cur_goals = self._gather_cur_goals()
+        self.next_goals = self._gather_cur_goals(future=1)
+        
+        # 初始化goal_start_pos缓冲区
+        if not hasattr(self, 'goal_start_pos'):
+            self.goal_start_pos = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
             
     def _parse_cfg(self, cfg):
         self.dt = self.cfg.control.decimation * self.sim_params.dt
@@ -2043,10 +1917,12 @@ class HumanoidRobot(BaseTask):
             sphere_geom = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(1, 0, 0))
             sphere_geom_cur = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(0, 0, 1))
             sphere_geom_reached = gymutil.WireframeSphereGeometry(self.cfg.env.next_goal_threshold, 32, 32, None, color=(0, 1, 0))
-            goals = self.terrain_goals[self.terrain_levels[self.lookat_id], self.terrain_types[self.lookat_id]].cpu().numpy()
+            goals = self.terrain_goals[0, 0].cpu().numpy()  # PLY模式使用单一地形
             for i, goal in enumerate(goals):
-                goal_xy = goal[:2] + self.terrain.cfg.border_size
+                goal_xy = goal[:2]
                 pts = (goal_xy/self.terrain.cfg.horizontal_scale).astype(int)
+                pts[0] = max(0, min(pts[0], self.height_samples.shape[0]-1))
+                pts[1] = max(0, min(pts[1], self.height_samples.shape[1]-1))
                 goal_z = self.height_samples[pts[0], pts[1]].cpu().item() * self.terrain.cfg.vertical_scale
                 pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], goal_z), r=None)
                 if i == self.cur_goal_idx[self.lookat_id].cpu().item():
@@ -2320,8 +2196,7 @@ class HumanoidRobot(BaseTask):
         # ========================================
         
         # 4.1 策略观测点：世界坐标系 -> 网格索引
-        points_grid = points_world + self.terrain.cfg.border_size  # 加上边界偏移
-        points_grid = (points_grid / self.terrain.cfg.horizontal_scale).long()  # 转换为网格索引
+        points_grid = (points_world / self.terrain.cfg.horizontal_scale).long()  # 转换为网格索引
         px = torch.clip(points_grid[:, :, 0].view(-1), 0, self.height_samples.shape[0]-2)
         py = torch.clip(points_grid[:, :, 1].view(-1), 0, self.height_samples.shape[1]-2)
         
@@ -2363,8 +2238,7 @@ class HumanoidRobot(BaseTask):
         # ========================================
         
         # 6.1 世界坐标系 -> 网格索引
-        points_data_grid = points_data_world + self.terrain.cfg.border_size
-        points_data_grid = (points_data_grid / self.terrain.cfg.horizontal_scale).long()
+        points_data_grid = (points_data_world / self.terrain.cfg.horizontal_scale).long()
         px_data = torch.clip(points_data_grid[:, :, 0].view(-1), 0, self.height_samples.shape[0]-2)
         py_data = torch.clip(points_data_grid[:, :, 1].view(-1), 0, self.height_samples.shape[1]-2)
         
@@ -2424,8 +2298,6 @@ class HumanoidRobot(BaseTask):
             left_points = left_foot_pos.clone()
             right_points = right_foot_pos.clone()
 
-        left_points += self.terrain.cfg.border_size
-        right_points += self.terrain.cfg.border_size
         left_points = (left_points/self.terrain.cfg.horizontal_scale).long()
         right_points = (right_points/self.terrain.cfg.horizontal_scale).long()
         left_px = left_points[:, :, 0].view(-1)
@@ -2739,8 +2611,7 @@ class HumanoidRobot(BaseTask):
         
         # === 关键：查询真实地形高度 ===
         # 将世界坐标转换为地形网格索引
-        points_grid = sample_points_world + self.terrain.cfg.border_size
-        points_grid = (points_grid / self.terrain.cfg.horizontal_scale).long()
+        points_grid = (sample_points_world / self.terrain.cfg.horizontal_scale).long()
         
         # 展平以便批量采样
         E, F, S = self.num_envs, len(self.feet_indices), n_samples

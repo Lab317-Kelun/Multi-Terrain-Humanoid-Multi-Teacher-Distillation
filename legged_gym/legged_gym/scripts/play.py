@@ -71,13 +71,7 @@ def play(args):
     env_cfg.commands.ranges.ang_vel_yaw = [-0.0, 0.0]
     env_cfg.commands.ranges.heading = [-0.0, 0.0]
     env_cfg.commands.ranges.height = [-0.0, 0.0]
-    
-    env_cfg.terrain.num_rows = 1
-    env_cfg.terrain.num_cols = 1
-    env_cfg.terrain.max_init_terrain_level = 0
-
-    env_cfg.terrain.height = [0.00, 0.02]
-    
+        
     env_cfg.depth.angle = [0, 1]
     env_cfg.noise.add_noise = True
     env_cfg.domain_rand.randomize_friction = True

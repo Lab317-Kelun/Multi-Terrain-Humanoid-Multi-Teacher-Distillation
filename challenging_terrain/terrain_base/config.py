@@ -1,77 +1,43 @@
 class terrain_config:
-
-        # === 网格类型和精度 ===
-        mesh_type = "terrain"           # 网格类型："terrain"=地形, "None"=平地
-        max_error = 0.1                 # 网格简化的最大误差（用于加速），单位：米
-        max_error_camera = 2            # 相机渲染用的最大误差
-        
-        # === 地形生成范围 ===
-        y_range = [-0.2, 0.2]          # Y方向随机偏移范围，单位：米
-        
-        # === 网格分辨率参数（关键！） ===
-        edge_width_thresh = 0.05        # 边缘宽度阈值，单位：米
-        horizontal_scale = 0.05         # 水平分辨率（每个网格的边长），单位：米，影响计算时间！
-        horizontal_scale_camera = 0.1   # 相机用的水平分辨率（可以更粗糙）
-        vertical_scale = 0.005          # 垂直分辨率（高度方向的精度），单位：米
-        border_size = 2                 # 地形边界大小，单位：米
-        
-        # === 地形特征参数 === 
-        height = [0.00, 0.02]          # 随机粗糙度的高度范围 [最小, 最大]，单位：米
-        simplify_grid = False           # 是否简化网格（减少三角形数量）
-        downsampled_scale = 0.075       # 下采样比例
-        curriculum = True               # 是否启用课程学习（难度递增）
-        
-        # === 物理属性 ===
-        static_friction = [0.4, 1.0]   # 静摩擦系数 U(0.4, 1.0)
-        dynamic_friction = [0.4, 1.0]  # 动摩擦系数 U(0.4, 1.0)
-        restitution = [0.0, 0.3]       # 弹性系数 U(0.0, 0.3)
-        
-        # === 高度测量配置===
-        measure_heights = True          # 是否生成高度采样点
-        measured_points_x = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        # measured_points_y = [
-        #     9.3, 9.4, 9.5, 9.6, 9.7,
-        #     9.8, 9.9, 10.0, 10.1, 10.2,
-        #     10.3, 10.4, 10.5, 10.6, 10.7
-        # ]
-        measured_points_y = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        
-        
-        # 用于roll/pitch噪声计算的原始采样点（没有偏移）
-        measured_points_x_origin = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        measured_points_y_origin = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        
-        # 高度测量的域随机化参数（模拟真实传感器误差）
-        measure_horizontal_noise = 0.     # 水平噪声幅度，单位：米
-        measure_horizontal_offset = 0.    # 水平偏移量，单位：米
-        measure_vertical_offset = 0.03     # 垂直偏移量 U(-0.03, 0.03) m，模拟雷达系统性高度误差
-        measure_vertical_noise = 0.03       # 垂直噪声 U(-0.03, 0.03) m，模拟测量抖动
-        measure_map_roll_pitch_noise = 0.03 # 地图倾斜噪声 U(-0.03, 0.03) m，模拟俯仰/滚转旋转误差
-        measure_map_yaw_noise = 0.0         # 地图偏航噪声 U(-0.2, 0.2) rad，模拟偏航旋转误差
-        # foothold_extension_prob = 0.6       # 支撑面扩展概率（暂时注释，需要重新理解和实现）
-        map_repeat_prob = 0.2               # 地图更新延迟概率，模拟地图刷新滞后
-        
-        # === 地形网格布局 ===
-        max_init_terrain_level = 0      # 初始课程难度等级（从第几行开始）
-        terrain_length = 20.            # 单个地形块的长度（X方向），单位：米 8 10
-        terrain_width = 20.              # 单个地形块的宽度（Y方向），单位：米 17 5
-        platform_size = 1.5             # 起始平台大小，单位：米
-        num_rows = 8                 # 地形行数（难度级别数）：0级最简单，8级最难
-        num_cols = 2                   # 地形列数（地形类型数）：每列是不同的地形类型
-        
-        # === 目标点配置 ===
-        num_goals = 10                  # 每个地形块的目标点数量
-        
-        # === 数据集采样点（15×15网格，间距0.1m，覆盖1.5m×1.5m） ===
-        # X方向采样点：从-0.7m到+0.7m，间距0.1m，共15个点
-        dataset_points_x = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        # Y方向采样点：从-0.7m到+0.7m，间距0.1m，共15个点
-        # dataset_points_y = [
-        #     9.3, 9.4, 9.5, 9.6, 9.7,
-        #     9.8, 9.9, 10.0, 10.1, 10.2,
-        #     10.3, 10.4, 10.5, 10.6, 10.7
-        # ]
-        dataset_points_y = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        # === 地形处理参数 ===
-        slope_treshold = 1.5            # 坡度阈值：超过此值的斜坡会被修正为垂直表面
-        origin_zero_z = True            # 环境原点的Z坐标是否为0（True=在地面，False=在地形高度）
+    """PLY Mesh 加载配置"""
+    
+    # === 网格类型 ===
+    mesh_type = "ply"  # 网格类型："ply"=从PLY文件加载, "None"=平地
+    
+    # === PLY文件加载配置 ===
+    ply_path = "/home/cft/kelun/Humanoid-Terrain-Bench/mesh/small_scane.ply"  # PLY文件路径
+    ply_scale = 1.0  # PLY mesh缩放因子（1.0=不缩放）
+    ply_offset = None  # PLY mesh偏移量 [x, y, z]，None=不偏移
+    
+    # === 地形网格参数（PLY模式使用默认值） ===
+    border_size = 0.0  # 边界大小（PLY模式不需要）
+    horizontal_scale = 0.1  # 水平缩放（用于高度采样网格索引转换）
+    vertical_scale = 0.005  # 垂直缩放（用于高度采样）
+    
+    # === 物理属性 ===
+    static_friction = [0.4, 1.0]  # 静摩擦系数范围
+    dynamic_friction = [0.4, 1.0]  # 动摩擦系数范围
+    restitution = [0.0, 0.3]  # 弹性系数范围
+    
+    # === 高度测量配置 ===
+    measure_heights = True  # 是否生成高度采样点
+    measured_points_x = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    measured_points_y = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    measured_points_x_origin = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    measured_points_y_origin = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    
+    # 高度测量的域随机化参数（模拟真实传感器误差）
+    measure_horizontal_noise = 0.0  # 水平噪声幅度，单位：米
+    measure_horizontal_offset = 0.0  # 水平偏移量，单位：米
+    measure_vertical_offset = 0.03  # 垂直偏移量范围，单位：米
+    measure_vertical_noise = 0.03  # 垂直噪声范围，单位：米
+    measure_map_roll_pitch_noise = 0.03  # 地图倾斜噪声，单位：米
+    measure_map_yaw_noise = 0.0  # 地图偏航噪声，单位：弧度
+    map_repeat_prob = 0.2  # 地图更新延迟概率
+    
+    # === 数据集采样点配置 ===
+    dataset_points_x = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    dataset_points_y = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    
+    # === 目标点配置 ===
+    num_goals = 10  # 目标点数量
