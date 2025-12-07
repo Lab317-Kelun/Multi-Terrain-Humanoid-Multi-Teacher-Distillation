@@ -51,6 +51,7 @@ from terrain_base.config import terrain_config
 from legged_gym.utils.math import *
 from legged_gym.utils.helpers import class_to_dict
 from scipy.spatial.transform import Rotation as R
+from scipy.spatial import cKDTree
 from .legged_robot_config import LeggedRobotCfg
 
 from tqdm import tqdm
@@ -302,7 +303,14 @@ class HumanoidRobot(BaseTask):
         goal_y = robot_pos[:, 1] + distances * torch.sin(target_angles)
         
         # 获取目标点的高度（从地形采样）
-        if hasattr(self, 'height_samples') and self.height_samples is not None:
+        is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                      hasattr(self.terrain, 'mesh_bounds'))
+        
+        if is_ply_mesh:
+            # PLY mesh模式：直接从mesh采样高度
+            goal_points = torch.stack([goal_x, goal_y], dim=1)  # [num_envs, 2]
+            goal_z = self._sample_height_from_mesh(goal_points)
+        elif hasattr(self, 'height_samples') and self.height_samples is not None:
             # 转换为网格索引
             goal_points = torch.stack([goal_x, goal_y], dim=1)  # [num_envs, 2]
             goal_points_grid = (goal_points / self.terrain.cfg.horizontal_scale).long()
@@ -1317,6 +1325,35 @@ class HumanoidRobot(BaseTask):
         self.root_states[env_ids, :3] += self.env_origins[env_ids]
         if self.cfg.env.randomize_start_pos:
             self.root_states[env_ids, :2] += torch_rand_float(-0.3, 0.3, (len(env_ids), 2), device=self.device)
+        
+        # 如果是PLY mesh，确保位置在mesh边界内，并更新z坐标
+        is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                      hasattr(self.terrain, 'mesh_bounds'))
+        if is_ply_mesh:
+            mesh_bounds = self.terrain.mesh_bounds
+            margin = getattr(self.cfg.env, 'spawn_margin', 2.0)
+            
+            # 限制xy坐标在mesh边界内
+            self.root_states[env_ids, 0] = torch.clamp(
+                self.root_states[env_ids, 0],
+                mesh_bounds['x_min'] + margin,
+                mesh_bounds['x_max'] - margin
+            )
+            self.root_states[env_ids, 1] = torch.clamp(
+                self.root_states[env_ids, 1],
+                mesh_bounds['y_min'] + margin,
+                mesh_bounds['y_max'] - margin
+            )
+            
+            # 从mesh采样新的z坐标高度
+            # 注意：当前root_states[2] = base_init_state[2] + env_origins[2]（旧的地形高度）
+            # 因为XY被randomize了，需要重新采样新位置的地形高度
+            # 先减去旧的env_origins[2]，然后加上新的地形高度
+            xy_positions = self.root_states[env_ids, :2]
+            sampled_heights = self._sample_height_from_mesh(xy_positions)  # 新的地形表面高度
+            # 最终位置 = base_init_state[2] + 新地形高度
+            self.root_states[env_ids, 2] = self.base_init_state[2] + sampled_heights
+        
         if self.cfg.env.randomize_start_yaw:
             rand_yaw = self.cfg.env.rand_yaw_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
             if self.cfg.env.randomize_start_pitch:
@@ -1707,6 +1744,24 @@ class HumanoidRobot(BaseTask):
             pos = self.env_origins[i].clone()
             if self.cfg.domain_rand.randomize_start_pos:
                 pos[:2] += torch_rand_float(-1., 1., (2,1), device=self.device).squeeze(1)
+            
+            # 如果是PLY mesh，确保位置在mesh边界内
+            is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                          hasattr(self.terrain, 'mesh_bounds'))
+            if is_ply_mesh:
+                mesh_bounds = self.terrain.mesh_bounds
+                margin = getattr(self.cfg.env, 'spawn_margin', 2.0)
+                
+                # 限制xy坐标在mesh边界内
+                pos[0] = torch.clamp(pos[0], mesh_bounds['x_min'] + margin, mesh_bounds['x_max'] - margin)
+                pos[1] = torch.clamp(pos[1], mesh_bounds['y_min'] + margin, mesh_bounds['y_max'] - margin)
+                
+                # 从mesh采样z坐标高度
+                # 注意：sampled_height是地形表面高度，最终位置会通过start_pose.p加上base_init_state[2]
+                xy_pos = pos[:2].unsqueeze(0)
+                sampled_height = self._sample_height_from_mesh(xy_pos)
+                pos[2] = sampled_height[0]  # 存储地形表面高度，base_init_state[2]会在后面加上
+            
             if self.cfg.domain_rand.randomize_start_yaw:
                 rand_yaw_quat = gymapi.Quat.from_euler_zyx(0., 0., self.cfg.domain_rand.rand_yaw_range*np.random.uniform(-1, 1))
                 start_pose.r = rand_yaw_quat
@@ -1797,18 +1852,125 @@ class HumanoidRobot(BaseTask):
         self.upper_body_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], self.cfg.asset.upper_body_link)
         self.imu_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], self.cfg.asset.imu_link)
 
+    def _sample_height_from_mesh(self, xy_positions):
+        """
+        从PLY mesh中采样指定xy位置的高度
+        
+        参数:
+            xy_positions: torch.Tensor, 形状为 (N, 2)，包含[x, y]坐标
+        
+        返回:
+            heights: torch.Tensor, 形状为 (N,)，包含采样到的高度z坐标
+        """
+        if not hasattr(self.terrain, 'mesh_bounds'):
+            # 如果没有mesh边界信息，返回0高度
+            return torch.zeros(xy_positions.shape[0], device=xy_positions.device)
+        
+        # 将xy坐标转换为numpy数组
+        xy_np = xy_positions.cpu().numpy() if xy_positions.is_cuda else xy_positions.numpy()
+        
+        # 确保xy_np是2D数组
+        if xy_np.ndim == 1:
+            xy_np = xy_np.reshape(1, -1)
+        
+        # 构建mesh顶点的KDTree（仅使用xy坐标）
+        vertices_xy = self.terrain.vertices[:, :2]
+        kdtree = cKDTree(vertices_xy)
+        
+        # 查询每个xy位置的最近邻顶点
+        distances, indices = kdtree.query(xy_np, k=1)
+        
+        # 处理单个点查询返回标量的情况
+        if np.isscalar(indices):
+            indices = np.array([indices])
+        
+        # 获取最近邻顶点的z坐标作为高度
+        heights = self.terrain.vertices[indices, 2]
+        
+        # 确保heights是一维数组
+        if heights.ndim > 1:
+            heights = heights.flatten()
+        
+        # 转换为torch tensor并返回
+        return torch.tensor(heights, dtype=torch.float32, device=xy_positions.device)
+    
     def _get_env_origins(self):
         """设置环境原点，使用网格布局"""
         self.env_origins = torch.zeros(self.num_envs, 3, device=self.device, requires_grad=False)
         
-        # 创建机器人网格布局
-        num_cols = np.floor(np.sqrt(self.num_envs))
-        num_rows = np.ceil(self.num_envs / num_cols)
-        xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols))
-        spacing = self.cfg.env.env_spacing
-        self.env_origins[:, 0] = spacing * xx.flatten()[:self.num_envs]
-        self.env_origins[:, 1] = spacing * yy.flatten()[:self.num_envs]
-        self.env_origins[:, 2] = 0.
+        # 检查是否是PLY mesh类型
+        is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                      hasattr(self.terrain, 'mesh_bounds'))
+        
+        if is_ply_mesh:
+            # PLY mesh模式：确保机器人出生在mesh范围内
+            mesh_bounds = self.terrain.mesh_bounds
+            
+            # 计算mesh的中心和大小
+            mesh_center_x = (mesh_bounds['x_min'] + mesh_bounds['x_max']) / 2
+            mesh_center_y = (mesh_bounds['y_min'] + mesh_bounds['y_max']) / 2
+            mesh_size_x = mesh_bounds['x_max'] - mesh_bounds['x_min']
+            mesh_size_y = mesh_bounds['y_max'] - mesh_bounds['y_min']
+            
+            # 预留边界，确保机器人不会太靠近mesh边缘
+            margin = getattr(self.cfg.env, 'spawn_margin', 2.0)  # 默认预留2米边界
+            usable_size_x = max(0.1, mesh_size_x - 2 * margin)
+            usable_size_y = max(0.1, mesh_size_y - 2 * margin)
+            
+            # 创建机器人网格布局，但限制在mesh可用范围内
+            num_cols = np.floor(np.sqrt(self.num_envs))
+            num_rows = np.ceil(self.num_envs / num_cols)
+            
+            # 根据可用空间计算合适的间距
+            spacing = self.cfg.env.env_spacing
+            max_spacing_x = usable_size_x / max(1, num_rows - 1) if num_rows > 1 else usable_size_x
+            max_spacing_y = usable_size_y / max(1, num_cols - 1) if num_cols > 1 else usable_size_y
+            spacing = min(spacing, max_spacing_x, max_spacing_y)
+            
+            # 生成网格位置（相对于mesh中心）
+            xx, yy = torch.meshgrid(
+                torch.arange(num_rows, dtype=torch.float32), 
+                torch.arange(num_cols, dtype=torch.float32)
+            )
+            
+            # 计算起始位置（使网格居中）
+            start_x = mesh_center_x - (num_rows - 1) * spacing / 2
+            start_y = mesh_center_y - (num_cols - 1) * spacing / 2
+            
+            # 设置xy坐标
+            self.env_origins[:, 0] = start_x + spacing * xx.flatten()[:self.num_envs]
+            self.env_origins[:, 1] = start_y + spacing * yy.flatten()[:self.num_envs]
+            
+            # 确保所有位置都在mesh边界内（添加安全检查）
+            self.env_origins[:, 0] = torch.clamp(
+                self.env_origins[:, 0], 
+                mesh_bounds['x_min'] + margin, 
+                mesh_bounds['x_max'] - margin
+            )
+            self.env_origins[:, 1] = torch.clamp(
+                self.env_origins[:, 1], 
+                mesh_bounds['y_min'] + margin, 
+                mesh_bounds['y_max'] - margin
+            )
+            
+            # 从mesh采样z坐标高度
+            # 注意：env_origins[2]存储地形表面高度，最终位置会加上base_init_state[2]
+            xy_positions = self.env_origins[:, :2]
+            self.env_origins[:, 2] = self._sample_height_from_mesh(xy_positions)
+            
+            print(f"Generated {self.num_envs} spawn positions within mesh bounds")
+            print(f"X range: [{self.env_origins[:, 0].min().item():.2f}, {self.env_origins[:, 0].max().item():.2f}]")
+            print(f"Y range: [{self.env_origins[:, 1].min().item():.2f}, {self.env_origins[:, 1].max().item():.2f}]")
+            print(f"Z range: [{self.env_origins[:, 2].min().item():.2f}, {self.env_origins[:, 2].max().item():.2f}]")
+        else:
+            # 原有逻辑：普通网格布局
+            num_cols = np.floor(np.sqrt(self.num_envs))
+            num_rows = np.ceil(self.num_envs / num_cols)
+            xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols))
+            spacing = self.cfg.env.env_spacing
+            self.env_origins[:, 0] = spacing * xx.flatten()[:self.num_envs]
+            self.env_origins[:, 1] = spacing * yy.flatten()[:self.num_envs]
+            self.env_origins[:, 2] = 0.
         
         # 设置goals（使用默认值）
         self.terrain_goals = torch.from_numpy(self.terrain.goals).to(self.device).to(torch.float)
@@ -1918,12 +2080,23 @@ class HumanoidRobot(BaseTask):
             sphere_geom_cur = gymutil.WireframeSphereGeometry(0.1, 32, 32, None, color=(0, 0, 1))
             sphere_geom_reached = gymutil.WireframeSphereGeometry(self.cfg.env.next_goal_threshold, 32, 32, None, color=(0, 1, 0))
             goals = self.terrain_goals[0, 0].cpu().numpy()  # PLY模式使用单一地形
+            
+            # 检查是否是PLY mesh模式
+            is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                          hasattr(self.terrain, 'mesh_bounds'))
+            
             for i, goal in enumerate(goals):
                 goal_xy = goal[:2]
-                pts = (goal_xy/self.terrain.cfg.horizontal_scale).astype(int)
-                pts[0] = max(0, min(pts[0], self.height_samples.shape[0]-1))
-                pts[1] = max(0, min(pts[1], self.height_samples.shape[1]-1))
-                goal_z = self.height_samples[pts[0], pts[1]].cpu().item() * self.terrain.cfg.vertical_scale
+                if is_ply_mesh:
+                    # PLY mesh模式：直接从mesh采样高度
+                    goal_xy_tensor = torch.tensor(goal_xy, dtype=torch.float32, device=self.device).unsqueeze(0)
+                    goal_z = self._sample_height_from_mesh(goal_xy_tensor)[0].cpu().item()
+                else:
+                    # 原有逻辑：从高度网格采样
+                    pts = (goal_xy/self.terrain.cfg.horizontal_scale).astype(int)
+                    pts[0] = max(0, min(pts[0], self.height_samples.shape[0]-1))
+                    pts[1] = max(0, min(pts[1], self.height_samples.shape[1]-1))
+                    goal_z = self.height_samples[pts[0], pts[1]].cpu().item() * self.terrain.cfg.vertical_scale
                 pose = gymapi.Transform(gymapi.Vec3(goal[0], goal[1], goal_z), r=None)
                 if i == self.cur_goal_idx[self.lookat_id].cpu().item():
                     gymutil.draw_lines(sphere_geom_cur, self.gym, self.viewer, self.envs[self.lookat_id], pose)
@@ -2192,20 +2365,35 @@ class HumanoidRobot(BaseTask):
             self.height_points_data_world = points_data_world
 
         # ========================================
-        # 第四步：从世界坐标系转换到网格索引，并采样高度
+        # 第四步：从世界坐标系采样高度
         # ========================================
         
-        # 4.1 策略观测点：世界坐标系 -> 网格索引
-        points_grid = (points_world / self.terrain.cfg.horizontal_scale).long()  # 转换为网格索引
-        px = torch.clip(points_grid[:, :, 0].view(-1), 0, self.height_samples.shape[0]-2)
-        py = torch.clip(points_grid[:, :, 1].view(-1), 0, self.height_samples.shape[1]-2)
+        # 检查是否是PLY mesh模式
+        is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                      hasattr(self.terrain, 'mesh_bounds'))
         
-        # 4.2 采样高度（三角形插值取最小值，保守估计）
-        heights1 = self.height_samples[px, py]
-        heights2 = self.height_samples[px+1, py]
-        heights3 = self.height_samples[px, py+1]
-        heights = torch.min(torch.min(heights1, heights2), heights3)
-        heights = heights.view(num_envs_process, -1) * self.terrain.cfg.vertical_scale  # 转换为米
+        if is_ply_mesh:
+            # PLY mesh模式：直接从mesh vertices采样高度
+            # 4.1 将世界坐标点转换为numpy数组（仅xy坐标）
+            points_world_xy = points_world[:, :, :2]  # [num_envs, num_points, 2]
+            points_xy_flat = points_world_xy.view(-1, 2)  # [num_envs * num_points, 2]
+            
+            # 4.2 使用已有的采样函数从mesh采样高度
+            heights_flat = self._sample_height_from_mesh(points_xy_flat)  # [num_envs * num_points]
+            heights = heights_flat.view(num_envs_process, self.num_height_points)  # [num_envs, num_points]
+        else:
+            # 原有逻辑：从高度网格采样
+            # 4.1 策略观测点：世界坐标系 -> 网格索引
+            points_grid = (points_world / self.terrain.cfg.horizontal_scale).long()  # 转换为网格索引
+            px = torch.clip(points_grid[:, :, 0].view(-1), 0, self.height_samples.shape[0]-2)
+            py = torch.clip(points_grid[:, :, 1].view(-1), 0, self.height_samples.shape[1]-2)
+            
+            # 4.2 采样高度（三角形插值取最小值，保守估计）
+            heights1 = self.height_samples[px, py]
+            heights2 = self.height_samples[px+1, py]
+            heights3 = self.height_samples[px, py+1]
+            heights = torch.min(torch.min(heights1, heights2), heights3)
+            heights = heights.view(num_envs_process, -1) * self.terrain.cfg.vertical_scale  # 转换为米
         
         # ========================================
         # 第五步：应用高度域随机化（在高度值上）
@@ -2237,17 +2425,26 @@ class HumanoidRobot(BaseTask):
         # 第六步：数据集记录用的高度采样（不添加域随机化噪声）
         # ========================================
         
-        # 6.1 世界坐标系 -> 网格索引
-        points_data_grid = (points_data_world / self.terrain.cfg.horizontal_scale).long()
-        px_data = torch.clip(points_data_grid[:, :, 0].view(-1), 0, self.height_samples.shape[0]-2)
-        py_data = torch.clip(points_data_grid[:, :, 1].view(-1), 0, self.height_samples.shape[1]-2)
-        
-        # 6.2 采样高度（无噪声）
-        heights1_data = self.height_samples[px_data, py_data]
-        heights2_data = self.height_samples[px_data+1, py_data]
-        heights3_data = self.height_samples[px_data, py_data+1]
-        heights_data = torch.min(torch.min(heights1_data, heights2_data), heights3_data)
-        heights_data = heights_data.view(num_envs_process, -1) * self.terrain.cfg.vertical_scale
+        if is_ply_mesh:
+            # PLY mesh模式：直接从mesh vertices采样高度（无噪声）
+            points_data_world_xy = points_data_world[:, :, :2]  # [num_envs, num_points_data, 2]
+            points_data_xy_flat = points_data_world_xy.view(-1, 2)  # [num_envs * num_points_data, 2]
+            
+            heights_data_flat = self._sample_height_from_mesh(points_data_xy_flat)  # [num_envs * num_points_data]
+            heights_data = heights_data_flat.view(num_envs_process, self.num_height_points_data)  # [num_envs, num_points_data]
+        else:
+            # 原有逻辑：从高度网格采样（无噪声）
+            # 6.1 世界坐标系 -> 网格索引
+            points_data_grid = (points_data_world / self.terrain.cfg.horizontal_scale).long()
+            px_data = torch.clip(points_data_grid[:, :, 0].view(-1), 0, self.height_samples.shape[0]-2)
+            py_data = torch.clip(points_data_grid[:, :, 1].view(-1), 0, self.height_samples.shape[1]-2)
+            
+            # 6.2 采样高度（无噪声）
+            heights1_data = self.height_samples[px_data, py_data]
+            heights2_data = self.height_samples[px_data+1, py_data]
+            heights3_data = self.height_samples[px_data, py_data+1]
+            heights_data = torch.min(torch.min(heights1_data, heights2_data), heights3_data)
+            heights_data = heights_data.view(num_envs_process, -1) * self.terrain.cfg.vertical_scale
 
         # ========================================
         # 第七步：地图更新延迟（Map Repeat）
@@ -2298,32 +2495,55 @@ class HumanoidRobot(BaseTask):
             left_points = left_foot_pos.clone()
             right_points = right_foot_pos.clone()
 
-        left_points = (left_points/self.terrain.cfg.horizontal_scale).long()
-        right_points = (right_points/self.terrain.cfg.horizontal_scale).long()
-        left_px = left_points[:, :, 0].view(-1)
-        right_px = right_points[:, :, 0].view(-1)
-        left_py = left_points[:, :, 1].view(-1)
-        right_py = right_points[:, :, 1].view(-1)
-        left_px = torch.clip(left_px, 0, self.height_samples.shape[0]-2)
-        right_px = torch.clip(right_px, 0, self.height_samples.shape[0]-2)
-        left_py = torch.clip(left_py, 0, self.height_samples.shape[1]-2)
-        right_py = torch.clip(right_py, 0, self.height_samples.shape[1]-2)
+        # 检查是否是PLY mesh模式
+        is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                      hasattr(self.terrain, 'mesh_bounds'))
+        
+        if is_ply_mesh:
+            # PLY mesh模式：直接从mesh采样高度
+            left_points_xy = left_points[:, :, :2]  # [num_envs, num_feet, 2]
+            right_points_xy = right_points[:, :, :2]
+            
+            # 展平以便批量采样
+            left_points_xy_flat = left_points_xy.view(-1, 2)
+            right_points_xy_flat = right_points_xy.view(-1, 2)
+            
+            left_heights_flat = self._sample_height_from_mesh(left_points_xy_flat)
+            right_heights_flat = self._sample_height_from_mesh(right_points_xy_flat)
+            
+            left_heights = left_heights_flat.view(left_points_xy.shape[0], left_points_xy.shape[1])
+            right_heights = right_heights_flat.view(right_points_xy.shape[0], right_points_xy.shape[1])
+            
+            left_foot_heights = left_foot_pos[:, :, 2] - left_heights
+            right_foot_heights = right_foot_pos[:, :, 2] - right_heights
+        else:
+            # 原有逻辑：从高度网格采样
+            left_points = (left_points/self.terrain.cfg.horizontal_scale).long()
+            right_points = (right_points/self.terrain.cfg.horizontal_scale).long()
+            left_px = left_points[:, :, 0].view(-1)
+            right_px = right_points[:, :, 0].view(-1)
+            left_py = left_points[:, :, 1].view(-1)
+            right_py = right_points[:, :, 1].view(-1)
+            left_px = torch.clip(left_px, 0, self.height_samples.shape[0]-2)
+            right_px = torch.clip(right_px, 0, self.height_samples.shape[0]-2)
+            left_py = torch.clip(left_py, 0, self.height_samples.shape[1]-2)
+            right_py = torch.clip(right_py, 0, self.height_samples.shape[1]-2)
 
-        left_heights1 = self.height_samples[left_px, left_py]
-        left_heights2 = self.height_samples[left_px+1, left_py]
-        left_heights3 = self.height_samples[left_px, left_py+1]
-        left_heights = torch.min(left_heights1, left_heights2)
-        left_heights = torch.min(left_heights, left_heights3)
-        left_heights = left_heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
-        left_foot_heights =  left_foot_pos[:, :, 2] - left_heights
+            left_heights1 = self.height_samples[left_px, left_py]
+            left_heights2 = self.height_samples[left_px+1, left_py]
+            left_heights3 = self.height_samples[left_px, left_py+1]
+            left_heights = torch.min(left_heights1, left_heights2)
+            left_heights = torch.min(left_heights, left_heights3)
+            left_heights = left_heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+            left_foot_heights =  left_foot_pos[:, :, 2] - left_heights
 
-        right_heights1 = self.height_samples[right_px, right_py]
-        right_heights2 = self.height_samples[right_px+1, right_py]
-        right_heights3 = self.height_samples[right_px, right_py+1]
-        right_heights = torch.min(right_heights1, right_heights2)
-        right_heights = torch.min(right_heights, right_heights3)
-        right_heights = right_heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
-        right_foot_heights =  right_foot_pos[:, :, 2] - right_heights
+            right_heights1 = self.height_samples[right_px, right_py]
+            right_heights2 = self.height_samples[right_px+1, right_py]
+            right_heights3 = self.height_samples[right_px, right_py+1]
+            right_heights = torch.min(right_heights1, right_heights2)
+            right_heights = torch.min(right_heights, right_heights3)
+            right_heights = right_heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+            right_foot_heights =  right_foot_pos[:, :, 2] - right_heights
 
         feet_heights = torch.cat((torch.mean(left_foot_heights, dim=-1, keepdim=True), torch.mean(right_foot_heights, dim=-1, keepdim=True)), dim=-1)
         feet_heights_var = torch.cat((torch.var(left_foot_heights, dim=-1, keepdim=True), torch.var(right_foot_heights, dim=-1, keepdim=True)), dim=-1)
@@ -2610,20 +2830,34 @@ class HumanoidRobot(BaseTask):
         sample_points_world = points_rotated + sample_center  # 平移回去，得到最终世界坐标
         
         # === 关键：查询真实地形高度 ===
-        # 将世界坐标转换为地形网格索引
-        points_grid = (sample_points_world / self.terrain.cfg.horizontal_scale).long()
+        # 检查是否是PLY mesh模式
+        is_ply_mesh = (hasattr(self.terrain, 'type') and self.terrain.type == 'ply' and 
+                      hasattr(self.terrain, 'mesh_bounds'))
         
-        # 展平以便批量采样
         E, F, S = self.num_envs, len(self.feet_indices), n_samples
-        px = torch.clip(points_grid[:, :, :, 0].reshape(-1), 0, self.height_samples.shape[0]-2)
-        py = torch.clip(points_grid[:, :, :, 1].reshape(-1), 0, self.height_samples.shape[1]-2)
         
-        # 三角形插值取最小值（保守估计）
-        h1 = self.height_samples[px, py]
-        h2 = self.height_samples[px+1, py]
-        h3 = self.height_samples[px, py+1]
-        terrain_heights = torch.min(torch.min(h1, h2), h3)
-        terrain_heights = terrain_heights.view(E, F, S) * self.terrain.cfg.vertical_scale  # dij
+        if is_ply_mesh:
+            # PLY mesh模式：直接从mesh采样高度
+            sample_points_world_xy = sample_points_world[:, :, :, :2]  # [E, F, S, 2]
+            sample_points_xy_flat = sample_points_world_xy.reshape(-1, 2)  # [E*F*S, 2]
+            
+            terrain_heights_flat = self._sample_height_from_mesh(sample_points_xy_flat)
+            terrain_heights = terrain_heights_flat.view(E, F, S)  # dij，单位已经是米
+        else:
+            # 原有逻辑：从高度网格采样
+            # 将世界坐标转换为地形网格索引
+            points_grid = (sample_points_world / self.terrain.cfg.horizontal_scale).long()
+            
+            # 展平以便批量采样
+            px = torch.clip(points_grid[:, :, :, 0].reshape(-1), 0, self.height_samples.shape[0]-2)
+            py = torch.clip(points_grid[:, :, :, 1].reshape(-1), 0, self.height_samples.shape[1]-2)
+            
+            # 三角形插值取最小值（保守估计）
+            h1 = self.height_samples[px, py]
+            h2 = self.height_samples[px+1, py]
+            h3 = self.height_samples[px, py+1]
+            terrain_heights = torch.min(torch.min(h1, h2), h3)
+            terrain_heights = terrain_heights.view(E, F, S) * self.terrain.cfg.vertical_scale  # dij
         
         # 获取高度容忍度 ε
         epsilon = getattr(self.cfg.rewards, 'foothold_height_tolerance', -0.1)

@@ -100,8 +100,21 @@ class Terrain:
             self.env_origins = np.array([[[0.0, 0.0, 0.0]]])  # 默认原点
             self.goals = np.zeros((1, 1, cfg.num_goals, 3))
             
+            # 计算mesh的边界范围（用于确保机器人出生在mesh内）
+            self.mesh_bounds = {
+                'x_min': float(np.min(self.vertices[:, 0])),
+                'x_max': float(np.max(self.vertices[:, 0])),
+                'y_min': float(np.min(self.vertices[:, 1])),
+                'y_max': float(np.max(self.vertices[:, 1])),
+                'z_min': float(np.min(self.vertices[:, 2])),
+                'z_max': float(np.max(self.vertices[:, 2]))
+            }
+            
             print("Loaded {} vertices".format(self.vertices.shape[0]))
             print("Loaded {} triangles".format(self.triangles.shape[0]))
+            print(f"Mesh bounds: x=[{self.mesh_bounds['x_min']:.2f}, {self.mesh_bounds['x_max']:.2f}], "
+                  f"y=[{self.mesh_bounds['y_min']:.2f}, {self.mesh_bounds['y_max']:.2f}], "
+                  f"z=[{self.mesh_bounds['z_min']:.2f}, {self.mesh_bounds['z_max']:.2f}]")
             return
         
         # 如果不是PLY类型，抛出错误
