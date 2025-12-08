@@ -94,7 +94,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         # next_goal_threshold 课程学习参数
         next_goal_threshold_curriculum = True  # 是否启用 next_goal_threshold 课程学习
         next_goal_threshold_init = 0.4  # 初始阈值
-        next_goal_threshold_target = 0.1  # 目标阈值
+        next_goal_threshold_target = 0.2  # 目标阈值
         next_goal_threshold_step = 0.001  # 每次成功时降低的步长
         next_goal_threshold_success_rate = 0.7  # 成功率阈值，超过此值才降低阈值
          

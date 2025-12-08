@@ -296,7 +296,7 @@ def main():
                     # 首次对齐时，记录当前pose作为起点，然后标记已开始移动
                     goal_start_pos = robot_pos.copy()
                     goal_started_moving = True
-                    need_recalc_timeout = False
+                    need_recalc_timeout = False  
                 
                 if goal_dynamic_update and distance_to_goal < goal_reach_threshold:
                     forward_dist = np.random.uniform(goal_distance_range[0], goal_distance_range[1])
@@ -319,6 +319,11 @@ def main():
                 
                 with torch.no_grad():
                     action = policy(torch.from_numpy(full_obs).unsqueeze(0)).detach().numpy().squeeze()
+                
+                # 动作裁剪：与训练环境一致（humanoid_robot.py 第163-164行）
+                # clip_actions = cfg.normalization.clip_actions / cfg.control.action_scale
+                clip_actions = config.get('clip_actions', 1.2) / config['action_scale']
+                action[:num_actions] = np.clip(action[:num_actions], -clip_actions, clip_actions)
                 
                 target_dof_pos = action[:num_actions] * config['action_scale'] + config['default_angles']
                 control_counter += 1

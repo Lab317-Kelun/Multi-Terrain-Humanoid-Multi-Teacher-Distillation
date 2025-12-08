@@ -278,9 +278,9 @@ class HumanoidRobot(BaseTask):
         在机器人周围360度范围内生成随机目标点（正前方0度，左右各180度，可全方向掉头转弯）
         """
         # 获取配置参数，如果没有设置则使用默认值
-        min_distance = getattr(self.cfg.env, 'goal_min_distance', 0.5)  # 最小距离（米）
-        max_distance = getattr(self.cfg.env, 'goal_max_distance', 3.0)  # 最大距离（米）
-        angle_range = getattr(self.cfg.env, 'goal_angle_range', 180.0)  # 角度范围（度），左右各180度（覆盖360度全方向）
+        min_distance = getattr(self.cfg.env, 'goal_min_distance', 1.0)  # 最小距离（米）
+        max_distance = getattr(self.cfg.env, 'goal_max_distance', 4.0)  # 最大距离（米）
+        angle_range = getattr(self.cfg.env, 'goal_angle_range', 90.0)  # 角度范围（度）
         
         num_envs = len(env_ids)
         
