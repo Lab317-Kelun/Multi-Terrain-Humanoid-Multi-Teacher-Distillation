@@ -1,0 +1,23 @@
+/**
+ * PD 控制目标 LCM 消息定义
+ * 通道："pd_plustau_targets"
+ * 发布者：Python 程序 (lcm_agent.py)
+ * 订阅者：C++ 程序 (g1_control.cpp)
+ * 
+ * 功能：发送关节目标位置和前馈力矩给 C++ 控制程序
+ * 
+ * C++ 处理逻辑（g1_control.cpp 第524-530行）：
+ * - 索引 0-14（前15个关节：腿12 + 腰3）：使用 q_des[i]
+ * - 索引 15-28（后14个关节：手臂14）：从 "arm_action" LCM 消息获取
+ * - PD 参数（Kp、Kd）：C++ 中硬编码，Python 无需传递
+ */
+struct pd_tau_targets_lcmt
+{
+    double q_des[29];          // 目标关节位置（单位：弧度）
+                               // 索引 0-11：来自策略网络（左右腿各 6 个）
+                               // 索引 12-14：当前为 0（腰部 3 个，C++ 会使用这些 0 值）
+                               // 索引 15-28：当前为 0（手臂 14 个，C++ 从 "arm_action" 消息获取）
+    double tau_ff[29];         // 前馈力矩（单位：N·m）
+                               // 当前全为 0（Python 未计算，C++ 使用 PD 控制）
+    int64_t timestamp_us;      // 时间戳（微秒）
+}

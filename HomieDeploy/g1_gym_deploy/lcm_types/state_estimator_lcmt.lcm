@@ -1,0 +1,30 @@
+/**
+ * 状态估计器 LCM 消息定义
+ * 通道："state_estimator_data"
+ * 发布者：C++ 程序 (g1_control.cpp)
+ * 订阅者：Python 程序 (cheetah_state_estimator.py)
+ * 
+ * 功能：提供机器人身体姿态和运动状态信息
+ */
+struct state_estimator_lcmt
+{
+    float rpy[3];              // 欧拉角 [roll, pitch, yaw]（单位：弧度）
+    float omegaBody[3];        // 身体角速度 [roll_rate, pitch_rate, yaw_rate]（单位：rad/s）
+    float aBody[3];            // 身体加速度 [ax, ay, az]（单位：m/s²，在身体坐标系中）
+    
+    float p[3];                // 机器人位置 [x, y, z]（单位：米，世界坐标系）
+                               // 注意：C++ 代码当前未填充此字段，Python 读取到的是 0
+    float vWorld[3];           // 世界坐标系中的线速度 [vx, vy, vz]（单位：m/s）
+                               // 注意：C++ 代码当前未填充此字段
+    float vBody[3];            // 身体坐标系中的线速度 [vx, vy, vz]（单位：m/s）
+                               // 注意：C++ 代码当前未填充此字段
+    float omegaWorld[3];       // 世界坐标系中的角速度（单位：rad/s）
+                               // 注意：C++ 代码当前未填充此字段
+    float quat[4];             // 四元数 [w, x, y, z]（表示身体姿态）
+                               // 注意：C++ 代码当前未填充此字段
+    float contact_estimate[4]; // 接触力估计（4个脚/接触点）
+                               // 注意：C++ 代码当前未填充此字段
+    float aWorld[3];           // 世界坐标系中的加速度（单位：m/s²）
+                               // 注意：C++ 代码当前未填充此字段
+    int64_t timestamp_us;      // 时间戳（微秒）
+}

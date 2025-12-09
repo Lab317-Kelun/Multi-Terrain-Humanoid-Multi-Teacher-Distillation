@@ -1,0 +1,16 @@
+/**
+ * 身体控制数据 LCM 消息定义
+ * 通道："body_control_data"
+ * 发布者：C++ 程序 (g1_control.cpp)
+ * 订阅者：Python 程序 (cheetah_state_estimator.py)
+ * 
+ * 功能：提供所有关节的位置和速度信息
+ */
+struct body_control_data_lcmt 
+{
+    float q[29];               // 关节位置（单位：弧度）
+                               // 索引顺序：左腿(0-5) + 右腿(6-11) + 腰部(12-14) + 左臂(15-21) + 右臂(22-28)
+    float qd[29];              // 关节速度（单位：rad/s）
+                               // 索引顺序与 q 相同
+    int64_t timestamp_us;      // 时间戳（微秒）
+}

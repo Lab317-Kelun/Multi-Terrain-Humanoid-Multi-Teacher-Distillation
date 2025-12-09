@@ -1,0 +1,35 @@
+/**
+ * 遥控器命令 LCM 消息定义
+ * 通道："rc_command"
+ * 发布者：C++ 程序 (g1_control.cpp)
+ * 订阅者：Python 程序 (cheetah_state_estimator.py)
+ * 
+ * 功能：提供游戏手柄/遥控器的摇杆和按钮状态
+ * 
+ * 使用说明：
+ * 1. R2 按钮 (right_lower_right_switch)：
+ *    - 用于控制流程：等待用户按 R2 开始校准、开始控制、重新校准
+ *    - 在 deployment_runner.py 中用于触发校准和暂停/继续控制
+ * 
+ * 2. 摇杆 (left_stick, right_stick)：
+ *    - 已启用：用于计算速度命令（如果未收到 pedal_command）
+ *    - 映射关系（在 cheetah_state_estimator.py 中实现）：
+ *      * left_stick[1] -> 前进速度 vx (缩放 0.6，向上推为正)
+ *      * left_stick[0] -> 侧向速度 vy (缩放 -0.5，向右推为正)
+ *      * right_stick[0] -> 偏航角速度 vyaw (缩放 -0.8，向右推为正)
+ *      * right_stick[1] -> 目标高度 height (缩放 -0.54，偏移 0.74，向上推为高)
+ *    - 优先级：如果收到 "pedal_command" 消息，优先使用 pedal_command；否则使用摇杆计算
+ */
+struct rc_command_lcmt
+{
+    int16_t mode;                      // 控制模式（未使用）
+    float left_stick[2];               // 左摇杆 [x, y]，范围 [-1, 1]
+    float right_stick[2];               // 右摇杆 [x, y]，范围 [-1, 1]
+    float knobs[2];                    // 旋钮（未使用）
+    int16_t left_upper_switch;         // 左上开关（未使用）
+    int16_t left_lower_left_switch;    // 左下左开关（未使用）
+    int16_t left_lower_right_switch;   // 左下右开关（未使用）
+    int16_t right_upper_switch;        // 右上开关（未使用）
+    int16_t right_lower_left_switch;   // 右下左开关（未使用）
+    int16_t right_lower_right_switch;   // R2 按钮（0 或 1），用于校准和控制
+}
