@@ -1,0 +1,2 @@
+/usr/bin/ar qc lib/liblcm_types_lib.a 
+/usr/bin/ranlib lib/liblcm_types_lib.a

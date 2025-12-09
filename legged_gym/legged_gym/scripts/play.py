@@ -57,11 +57,11 @@ def play(args):
         env_cfg.domain_rand.action_delay_view = 0
 
     env_cfg.env.num_envs = 1
-    env_cfg.env.episode_length_s = 6
-    env_cfg.commands.resampling_time = 6
+    env_cfg.env.episode_length_s = 20
+    env_cfg.commands.resampling_time = 4
     env_cfg.rewards.is_play = True
 
-    env_cfg.curriculum_config.success_mode = 'survival_time'
+    env_cfg.curriculum_config.success_mode = 'goal_reached'
     env_cfg.curriculum_config.survival_time_threshold = 6.0
     env_cfg.curriculum_config.survival_success_threshold = 1  # 连续存活成功次数阈值
     env_cfg.curriculum_config.survival_failure_threshold = 2   # 连续存活失败次数阈值
