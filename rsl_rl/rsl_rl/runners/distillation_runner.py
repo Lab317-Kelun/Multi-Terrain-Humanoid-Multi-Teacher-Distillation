@@ -235,6 +235,7 @@ class DistillationRunner(OnPolicyRunner):
                     obs = tensor_to_obs_groups(obs_tensor, self.cfg["obs_groups"]).to(self.device)
                     
                     # 处理奖励和完成标志
+                    #print("INFO:rewards:", rewards)
                     rewards = rewards.to(self.device).unsqueeze(-1)
                     dones = dones.to(self.device).unsqueeze(-1)
                     
