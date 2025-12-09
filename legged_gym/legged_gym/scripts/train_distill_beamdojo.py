@@ -17,8 +17,8 @@ import torch
 # Map terrain_id (int) to checkpoint path (str)
 # Please update these paths with actual checkpoints corresponding to each terrain type
 TEACHER_CHECKPOINTS = {
-    # 0: "path/to/teacher_terrain_0.pt",
-    # 1: "path/to/teacher_terrain_1.pt",
+     14: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Nov22_18-58-32--stage2_no_onehot_stone/model_43000.pt",
+     8: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Nov21_16-11-53--stage2_no_onehot_gap/model_9000.pt",
 }
 
 def build_distillation_cfg(env_cfg) -> Dict:
@@ -135,8 +135,10 @@ def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str
             
             if i < len(runner.alg.policy.teachers):
                 runner.alg.policy.teachers[i].load_state_dict(teacher_state, strict=False)
+                
             else:
                 print(f"Error: Teacher index {i} out of range (num_teachers={len(runner.alg.policy.teachers)}).")
+        runner.alg.policy.loaded_teacher = True
     else:
         if not checkpoint:
             raise ValueError("Please provide --teacher_checkpoint pointing to a trained PPO model or configure TEACHER_CHECKPOINTS.")

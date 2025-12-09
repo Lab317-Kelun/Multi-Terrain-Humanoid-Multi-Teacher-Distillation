@@ -179,7 +179,9 @@ class HumanoidRobot(BaseTask):
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
         self.extras["delta_yaw_ok"] = self.delta_yaw < 0.6
         if hasattr(self, "env_class"):
+            print("terrain_ids=",self.env_class)
             self.extras["terrain_ids"] = self.env_class.clone()
+            
         else:
             self.extras["terrain_ids"] = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         if self.cfg.depth.use_camera and self.global_counter % self.cfg.depth.update_interval == 0:
@@ -213,9 +215,9 @@ class HumanoidRobot(BaseTask):
         if(self.cfg.rewards.is_play):
             if(self.total_times > 0):
                 if(self.total_times > self.last_times):
-                    print("total_times=",self.total_times)
-                    print("success_rate=",self.success_times / self.total_times)
-                    print("complete_rate=",(self.complete_times / self.total_times).cpu().numpy().copy())
+                    # print("total_times=",self.total_times)
+                    # print("success_rate=",self.success_times / self.total_times)
+                    # print("complete_rate=",(self.complete_times / self.total_times).cpu().numpy().copy())
                     self.last_times = self.total_times
                     
 

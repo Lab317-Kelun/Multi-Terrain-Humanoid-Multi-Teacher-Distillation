@@ -314,6 +314,7 @@ class MultiStudentTeacher(nn.Module):
         # Check if state_dict contains teacher and student or just teacher parameters
         # 注意：必须先检查"student"键，因为student.actor_backbone.xxx也包含"actor"字符串
         # 如果先检查"actor"，会误判蒸馏checkpoint为PPO checkpoint
+        print("INFO: MultiStudentTeacher.load_state_dict called.")
         if any("student" in key for key in state_dict):  
             print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
             # 情况1：从蒸馏训练的checkpoint加载（包含"student."和"teacher."前缀的键）
@@ -338,6 +339,7 @@ class MultiStudentTeacher(nn.Module):
             # 情况2：从PPO训练的checkpoint加载（包含"actor."前缀的键，注意是"actor."不是"actor"）
             # 只加载教师网络，因为PPO checkpoint中只有actor网络（作为教师使用）
             # Rename keys to match teacher and remove critic parameters
+            print("INFO: Loading teacher from PPO checkpoint.")
             teacher_state_dict = {}
             teacher_obs_normalizer_state_dict = {}
             for key, value in state_dict.items():
