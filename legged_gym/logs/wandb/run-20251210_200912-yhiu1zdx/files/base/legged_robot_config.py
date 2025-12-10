@@ -1,1 +1,0 @@
-/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/legged_gym/envs/base/legged_robot_config.py
