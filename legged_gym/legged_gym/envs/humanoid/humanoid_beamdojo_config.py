@@ -250,9 +250,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
             lin_vel_x = [-0.8, 1.0] # min max [m/s]
-            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
+            lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
-            heading = [-1.2, 1.2]
+            heading = [-1.2, 1.2] 
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -262,10 +262,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
-            
-            lateral_velocity = -1.0
-            
-            # reach_goal = 0.0
               
             lin_vel_z = -0.5
             ang_vel_xy = -0.025
@@ -280,7 +276,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             dof_pos_limits = -2.
             feet_air_time = 0.05
             feet_clearance = -0.25
-            feet_distance_lateral = 1.0 #0.5  
+            feet_distance_lateral = 0.5  
             knee_distance_lateral = 1.0
             feet_ground_parallel = -2.0  
             feet_parallel = -3.0
@@ -298,7 +294,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             action_vanish = -1.0
             stand_still = -0.15
             
-            foothold = 0.05
+            # foothold = 0.05
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -317,17 +313,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         foothold_foot_length = 0.12
         foothold_foot_width = 0.06
-        foothold_height_tolerance = -0.1     
-        
-        foothold_foot_length = 0.12         # 脚长度 [m] 
-        foothold_foot_width = 0.06          # 脚宽度 [m]
-        foothold_height_tolerance = -0.1    # 高度容忍度 [m]
+        foothold_height_tolerance = -0.1               
+
                
     class reward_config():
         dense_rewards = [
             "tracking_x_vel", "tracking_y_vel", "tracking_ang_vel",
             "heading_tracking", 
-            'lateral_velocity',
             "lin_vel_z", "ang_vel_xy", "orientation", "action_rate",
             "tracking_base_height", 
             "deviation_hip_joint", "deviation_ankle_joint", 
