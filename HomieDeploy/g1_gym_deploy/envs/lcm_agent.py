@@ -176,6 +176,7 @@ class LCMAgent():
         # ========== 动态观测：delta_yaw, delta_pose_x, delta_pose_y ==========
         # 如果收到目标点命令（pedal_command），启用这三个观测
         # 注意：观测顺序与训练代码一致：delta_yaw, delta_pose_x, delta_pose_y
+        # 参考训练代码：humanoid_robot.py 的 compute_observations() 方法（第745-850行）
         if self.use_target_command:
             # 获取目标点和当前位置
             target_point = self.se.get_target_point()  # [target_x, target_y]（只包含位置）
@@ -184,23 +185,35 @@ class LCMAgent():
             
             # 计算到目标点的方向向量
             target_vec = target_point - current_pos
+            distance = np.linalg.norm(target_vec)
+            
+            # 归一化目标向量（参考训练代码第384行）
+            if distance > 1e-5:
+                target_vec_norm = target_vec / distance
+            else:
+                target_vec_norm = np.array([1.0, 0.0])  # 默认方向
+            
+            # 计算目标朝向（参考训练代码第385行）
+            target_yaw = np.arctan2(target_vec_norm[1], target_vec_norm[0])
             
             # delta_yaw(1) * delta_yaw_scale (0.5)
-            # 计算目标朝向：从当前位置指向目标点的角度
-            target_yaw = np.arctan2(target_vec[1], target_vec[0])
-            # 计算当前朝向到目标朝向的差值
+            # 参考训练代码第747行：delta_yaw = wrap_to_pi(self.commands[:, 3] - self.yaw)
+            # 其中 commands[:, 3] 是目标朝向（target_yaw）
+            # wrap_to_pi 实现：np.arctan2(np.sin(angle), np.cos(angle))
             delta_yaw = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
-            proprio_obs[idx] = delta_yaw * 0.5
+            proprio_obs[idx] = delta_yaw * 0.5  # 参考训练代码第783行：noisy_delta_yaw * obs_scales.delta_yaw
             idx += 1
             
             # delta_pose_x(1) * delta_pose_scale (0.5)
-            delta_pose_x = target_vec[0]  # target_point[0] - current_pos[0]
-            proprio_obs[idx] = delta_pose_x * 0.5
+            # 参考训练代码第749行：delta_pose_x = self.cur_goals[:, 0] - self.root_states[:, 0]
+            delta_pose_x = target_point[0] - current_pos[0]
+            proprio_obs[idx] = delta_pose_x * 0.5  # 参考训练代码第784行：noisy_delta_pose_x * obs_scales.delta_pose_x
             idx += 1
             
             # delta_pose_y(1) * delta_pose_scale (0.5)
-            delta_pose_y = target_vec[1]  # target_point[1] - current_pos[1]
-            proprio_obs[idx] = delta_pose_y * 0.5
+            # 参考训练代码第750行：delta_pose_y = self.cur_goals[:, 1] - self.root_states[:, 1]
+            delta_pose_y = target_point[1] - current_pos[1]
+            proprio_obs[idx] = delta_pose_y * 0.5  # 参考训练代码第785行：noisy_delta_pose_y * obs_scales.delta_pose_y
             idx += 1
         
         # gravity(3) - 无 scale（训练代码中直接使用）

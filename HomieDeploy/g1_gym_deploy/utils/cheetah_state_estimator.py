@@ -141,6 +141,10 @@ class StateEstimator:
         self.target_point = np.zeros(2)  # 目标点 [x, y]
         self.received_target_command = False  # 是否收到过目标点命令（pedal_command）
         
+        # 用于记录"先转向"状态
+        self.need_turn_first = False  # 是否需要先转向（当第一次检测到 heading_error > 30度时设置）
+        self.last_target_point = None  # 上一次的目标点（用于检测目标点是否改变）
+        
 
     def get_gravity_vector(self):
         """
@@ -177,7 +181,13 @@ class StateEstimator:
         注意：如果收到目标点命令，会启用 delta_yaw, delta_pose_x, delta_pose_y 三个观测
         """
         # 如果收到过目标点命令，根据目标点和当前位置计算速度命令
+        # 参考训练代码：humanoid_robot.py 的 _post_physics_step_callback() 方法
         if self.received_target_command:
+            # 检查目标点是否改变（如果改变，重置"先转向"状态）
+            if self.last_target_point is None or not np.allclose(self.target_point, self.last_target_point):
+                self.need_turn_first = False  # 目标点改变，重置状态
+            self.last_target_point = self.target_point.copy()
+            
             # 获取当前位置和朝向
             current_pos = self.base_pos[:2]  # [x, y]
             current_yaw = self.euler[2]  # yaw
@@ -186,27 +196,61 @@ class StateEstimator:
             target_vec = self.target_point - current_pos
             distance = np.linalg.norm(target_vec)
             
-            # 计算目标朝向（从当前位置指向目标点的角度）
-            target_yaw = np.arctan2(target_vec[1], target_vec[0])
+            # 归一化目标向量（参考训练代码第384行）
+            if distance > 1e-5:
+                target_vec_norm = target_vec / distance
+            else:
+                target_vec_norm = np.array([1.0, 0.0])  # 默认方向
             
-            # 计算 delta_yaw（当前朝向到目标朝向的差值）
-            delta_yaw = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
+            # 计算目标朝向（参考训练代码第385行）
+            target_yaw = np.arctan2(target_vec_norm[1], target_vec_norm[0])
             
-            # 根据距离和角度计算速度命令
-            # 前进速度：根据距离和朝向误差计算
-            max_vel = 0.8  # 最大前进速度
-            cmd_x = max_vel * np.cos(delta_yaw) * np.clip(distance / 2.0, 0.0, 1.0)  # 距离越远速度越大，但有上限
+            # 计算朝向误差（参考训练代码第986行：heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)）
+            # wrap_to_pi 实现：np.arctan2(np.sin(angle), np.cos(angle))
+            heading_error = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
             
-            # 侧向速度：根据侧向误差计算
-            lateral_error = distance * np.sin(delta_yaw)
-            max_lateral_vel = 0.4
-            cmd_y = np.clip(lateral_error * 0.5, -max_lateral_vel, max_lateral_vel)
+            # 角速度命令（参考训练代码第992-993行）
+            # ang_vel_cmd = 0.8 * heading_error
+            # ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
+            ang_vel_cmd = 0.8 * heading_error
+            cmd_yaw = np.clip(ang_vel_cmd, -0.5, 0.5)
             
-            # 角速度：根据朝向误差计算
-            max_yaw_vel = 0.4
-            cmd_yaw = np.clip(delta_yaw * 2.0, -max_yaw_vel, max_yaw_vel)
+            # 速度命令计算逻辑：
+            # 1. 如果 heading_error > 30度（约0.524 rad），需要先转向到0.15 rad范围内，再给线速度
+            # 2. 如果 heading_error < 30度，角速度和线速度都直接给
+            heading_error_deg = np.abs(heading_error) * 180.0 / np.pi  # 转换为度
+            large_heading_error = heading_error_deg > 30.0  # 大于30度
             
-            cmd_height = 0.74  # 固定高度
+            yaw_tolerance = 0.15  # 参考训练代码第636行：yaw_tolerance_for_linear_vel
+            heading_aligned = np.abs(heading_error) < yaw_tolerance  # 已对齐到0.15 rad范围内
+            
+            # 记录第一次检测到大于30度的状态
+            if large_heading_error and not self.need_turn_first:
+                self.need_turn_first = True  # 第一次检测到大于30度，设置标志
+            
+            # 原始线速度命令（从摇杆获取，用于参考）
+            # 这里我们使用固定的最大速度，实际应该从配置或摇杆获取
+            original_lin_vel_x = 0.5  # 参考训练代码配置：lin_vel_x = [0.5, 0.5]
+            original_lin_vel_y = 0.0  # 参考训练代码配置：lin_vel_y = [-0.0, 0.0]
+            
+            # 判断是否给线速度：
+            # - 如果 need_turn_first=True（曾经检测到 > 30度）：需要先转向，只有对齐到0.15 rad范围内才给线速度，并重置标志
+            # - 如果 need_turn_first=False（从未检测到 > 30度）且 heading_error < 30度：直接给线速度
+            if self.need_turn_first:
+                # 曾经检测到大于30度：先转向，只有对齐后才给线速度
+                if heading_aligned:
+                    cmd_x = original_lin_vel_x
+                    cmd_y = original_lin_vel_y
+                    self.need_turn_first = False  # 对齐后，重置标志，恢复正常逻辑
+                else:
+                    cmd_x = 0.0
+                    cmd_y = 0.0
+            else:
+                # 从未检测到大于30度，且当前小于30度：角速度和线速度都直接给
+                cmd_x = original_lin_vel_x
+                cmd_y = original_lin_vel_y
+            
+            cmd_height = 0.74  # 固定高度（参考训练代码配置：base_height_target = 0.74）
             
             return np.array([cmd_x, cmd_y, cmd_yaw, cmd_height], dtype=np.float32)
         
