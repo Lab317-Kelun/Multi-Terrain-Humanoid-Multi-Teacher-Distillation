@@ -1,0 +1,1 @@
+/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/legged_gym/envs/humanoid/humanoid_beamdojo_config.py

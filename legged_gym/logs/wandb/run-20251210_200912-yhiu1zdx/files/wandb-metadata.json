@@ -1,0 +1,53 @@
+{
+  "os": "Linux-5.15.0-139-generic-x86_64-with-glibc2.17",
+  "python": "CPython 3.8.20",
+  "startedAt": "2025-12-10T12:09:12.854325Z",
+  "args": [
+    "--task",
+    "humanoid_beamdojo",
+    "--device=cuda:1",
+    "--exptid=homie_stage0_target_navigation"
+  ],
+  "program": "train_beamdojo.py",
+  "codePath": "legged_gym/legged_gym/scripts/train_beamdojo.py",
+  "codePathLocal": "train_beamdojo.py",
+  "git": {
+    "remote": "https://github.com/Lab317-Kelun/Multi-Terrain-Humanoid-Multi-Teacher-Distillation.git",
+    "commit": "edaa639b524bdc0e9af7e2afda3d4e976d706148"
+  },
+  "email": "xie13318782539@163.com",
+  "root": "../../logs",
+  "host": "cft-181-Precision-7920-Tower",
+  "executable": "/home/cft/.conda/envs/beamdojo_kelun/bin/python3",
+  "cpu_count": 48,
+  "cpu_count_logical": 96,
+  "gpu": "NVIDIA RTX A5000",
+  "gpu_count": 2,
+  "disk": {
+    "/": {
+      "total": "1006450962432",
+      "used": "335002161152"
+    }
+  },
+  "memory": {
+    "total": "270039343104"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-7d69493d-bd63-a04a-ed07-6bcc15a84c26"
+    },
+    {
+      "name": "NVIDIA RTX A5000",
+      "memoryTotal": "25757220864",
+      "cudaCores": 8192,
+      "architecture": "Ampere",
+      "uuid": "GPU-d189de21-8b8e-c31d-db5c-75e57df5da97"
+    }
+  ],
+  "cudaVersion": "12.4",
+  "writerId": "4zskgowy2lkvvl1ydtfy1j82v5i1lii5"
+}
