@@ -137,9 +137,14 @@ class StateEstimator:
         self.command = np.zeros(4)
         self.command[3] = 0.74  # 默认高度（单位：米）
         
-        # 目标点命令 [target_x, target_y]（只包含位置，不包含朝向）
-        self.target_point = np.zeros(2)  # 目标点 [x, y]
+        # 目标点命令队列系统
+        self.target_point_queue = []  # 目标点列表（队列）
+        self.current_target_index = 0  # 当前目标点在队列中的索引
+        self.target_point = None  # 当前使用的目标点 [x, y]
         self.received_target_command = False  # 是否收到过目标点命令（pedal_command）
+        
+        # 目标点队列参数
+        self.target_reach_threshold = 0.3  # 目标到达阈值（m），距离小于此值认为到达目标
         
         # 用于记录"先转向"状态
         self.need_turn_first = False  # 是否需要先转向（当第一次检测到 heading_error > 30度时设置）
@@ -181,91 +186,67 @@ class StateEstimator:
         注意：如果收到目标点命令，会启用 delta_yaw, delta_pose_x, delta_pose_y 三个观测
         """
         # 如果收到过目标点命令，根据目标点和当前位置计算速度命令
-        # 参考训练代码：humanoid_robot.py 的 _post_physics_step_callback() 方法
         if self.received_target_command:
-            # 检查目标点是否改变（如果改变，重置"先转向"状态）
-            if self.last_target_point is None or not np.allclose(self.target_point, self.last_target_point):
-                self.need_turn_first = False  # 目标点改变，重置状态
-            self.last_target_point = self.target_point.copy()
+            # 更新当前目标点
+            self.target_point = np.array(self.target_point_queue[self.current_target_index], dtype=np.float32)
             
             # 获取当前位置和朝向
-            current_pos = self.base_pos[:2]  # [x, y]
-            current_yaw = self.euler[2]  # yaw
+            current_pos = self.base_pos[:2]
+            current_yaw = self.euler[2]
             
-            # 计算到目标点的方向向量
+            # 计算到目标点的距离
             target_vec = self.target_point - current_pos
             distance = np.linalg.norm(target_vec)
             
-            # 归一化目标向量（参考训练代码第384行）
-            if distance > 1e-5:
-                target_vec_norm = target_vec / distance
-            else:
-                target_vec_norm = np.array([1.0, 0.0])  # 默认方向
-            
-            # 计算目标朝向（参考训练代码第385行）
+            # 如果到达当前目标点，切换到下一个
+            if distance < self.target_reach_threshold:
+                self.current_target_index += 1
+                # 限制索引在有效范围内（越界时使用最后一个目标点）
+                if self.current_target_index >= len(self.target_point_queue):
+                    self.current_target_index = len(self.target_point_queue) - 1
+
+            target_vec_norm = target_vec / (distance + 1e-5)
             target_yaw = np.arctan2(target_vec_norm[1], target_vec_norm[0])
-            
-            # 计算朝向误差（参考训练代码第986行：heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)）
-            # wrap_to_pi 实现：np.arctan2(np.sin(angle), np.cos(angle))
             heading_error = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
             
-            # 角速度命令（参考训练代码第992-993行）
-            # ang_vel_cmd = 0.8 * heading_error
-            # ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
-            ang_vel_cmd = 0.8 * heading_error
-            cmd_yaw = np.clip(ang_vel_cmd, -0.5, 0.5)
+            cmd_yaw = np.clip(0.8 * heading_error, -0.5, 0.5)
             
-            # 速度命令计算逻辑：
-            # 1. 如果 heading_error > 30度（约0.524 rad），需要先转向到0.15 rad范围内，再给线速度
-            # 2. 如果 heading_error < 30度，角速度和线速度都直接给
-            heading_error_deg = np.abs(heading_error) * 180.0 / np.pi  # 转换为度
-            large_heading_error = heading_error_deg > 30.0  # 大于30度
+            if np.abs(heading_error) > np.pi/6 and not self.need_turn_first:
+                self.need_turn_first = True
             
-            yaw_tolerance = 0.15  # 参考训练代码第636行：yaw_tolerance_for_linear_vel
-            heading_aligned = np.abs(heading_error) < yaw_tolerance  # 已对齐到0.15 rad范围内
-            
-            # 记录第一次检测到大于30度的状态
-            if large_heading_error and not self.need_turn_first:
-                self.need_turn_first = True  # 第一次检测到大于30度，设置标志
-            
-            # 原始线速度命令（从摇杆获取，用于参考）
-            # 这里我们使用固定的最大速度，实际应该从配置或摇杆获取
-            original_lin_vel_x = 0.5  # 参考训练代码配置：lin_vel_x = [0.5, 0.5]
-            original_lin_vel_y = 0.0  # 参考训练代码配置：lin_vel_y = [-0.0, 0.0]
-            
-            # 判断是否给线速度：
-            # - 如果 need_turn_first=True（曾经检测到 > 30度）：需要先转向，只有对齐到0.15 rad范围内才给线速度，并重置标志
-            # - 如果 need_turn_first=False（从未检测到 > 30度）且 heading_error < 30度：直接给线速度
             if self.need_turn_first:
-                # 曾经检测到大于30度：先转向，只有对齐后才给线速度
-                if heading_aligned:
-                    cmd_x = original_lin_vel_x
-                    cmd_y = original_lin_vel_y
-                    self.need_turn_first = False  # 对齐后，重置标志，恢复正常逻辑
+                if np.abs(heading_error) < 0.15:
+                    cmd_x, cmd_y = 0.5, 0.0
+                    self.need_turn_first = False
                 else:
-                    cmd_x = 0.0
-                    cmd_y = 0.0
+                    cmd_x, cmd_y = 0.0, 0.0
             else:
-                # 从未检测到大于30度，且当前小于30度：角速度和线速度都直接给
-                cmd_x = original_lin_vel_x
-                cmd_y = original_lin_vel_y
+                cmd_x, cmd_y = 0.5, 0.0
             
-            cmd_height = 0.74  # 固定高度（参考训练代码配置：base_height_target = 0.74）
+            cmd_height = 0.74
             
             return np.array([cmd_x, cmd_y, cmd_yaw, cmd_height], dtype=np.float32)
         
-        # 从摇杆计算速度命令
+        # 如果没有目标点命令，从摇杆计算速度命令
+        return self._get_joystick_command()
+    
+    def _get_joystick_command(self):
+        """
+        从摇杆计算速度命令（内部方法）
+        
+        @return 速度命令 [vx, vy, vyaw, height]
+        """
         # 系数确定方式：
         # 1. 根据训练时的命令范围（训练代码中的 lin_vel_x, lin_vel_y, ang_vel_yaw 范围）
         # 2. 根据机器人的实际运动能力（最大安全速度）
         # 3. 根据操作体验（摇杆满量程对应合理的最大速度）
         # 摇杆输入范围：[-1, 1]，映射到实际速度命令
         cmd_x = 0.8 * self.left_stick[1]      # 前进速度：左摇杆 Y 轴（向上推为正，向下推为负）
-                                              # 系数 0.6：最大前进速度 0.6 m/s（摇杆满量程时）
+                                              # 系数 0.8：最大前进速度 0.8 m/s（摇杆满量程时）
         cmd_y = -0.4 * self.left_stick[0]     # 侧向速度：左摇杆 X 轴（向右推为正）
-                                              # 系数 -0.5：最大侧向速度 0.5 m/s（负号用于方向映射）
+                                              # 系数 -0.4：最大侧向速度 0.4 m/s（负号用于方向映射）
         cmd_yaw = -0.4 * self.right_stick[0]  # 偏航角速度：右摇杆 X 轴（向右推为正）
-                                              # 系数 -0.8：最大偏航角速度 0.8 rad/s（约 45°/s）
+                                              # 系数 -0.4：最大偏航角速度 0.4 rad/s（约 23°/s）
         cmd_height = 0.74                      # 目标高度：固定为 0.74m（不再使用右摇杆 Y 轴）
                                               # 固定值：与训练时的 base_height_target 一致
         
@@ -351,21 +332,22 @@ class StateEstimator:
         return self.base_pos
     
     def get_target_point(self):
-        """
-        获取目标点命令
-        
-        @return 目标点 [target_x, target_y]（单位：m, m）
-        注意：只包含位置，不包含朝向。delta_yaw 需要根据当前位置和朝向计算
-        """
+        """获取当前目标点 [target_x, target_y]，如果没有则返回 None"""
         return self.target_point
+
     
-    def has_target_command(self):
+    def get_target_queue_info(self):
         """
-        检查是否收到目标点命令
+        获取目标点队列信息（用于调试）
         
-        @return True 如果收到目标点命令，False 否则
+        @return 字典，包含队列信息
         """
-        return self.received_target_command
+        return {
+            'queue_length': len(self.target_point_queue),
+            'current_index': self.current_target_index,
+            'current_target': self.target_point.tolist() if self.target_point is not None else None,
+            'all_targets': self.target_point_queue.copy()
+        }
     
     def enable_tf_position(self, tf_buffer, tf_listener):
         """
@@ -482,12 +464,15 @@ class StateEstimator:
         消息内容：目标点 [target_x, target_y]（只包含位置，不包含朝向）
         
         功能：
+        - 维护目标点队列：收到新目标点直接添加到队列（外部已确保距离 > 0.6m）
+        - 机器人到达当前目标点（距离 < 0.3m）后，自动切换到下一个目标点
         - 如果收到此消息，会启用 delta_yaw, delta_pose_x, delta_pose_y 三个观测
         - delta_yaw 和速度命令会根据目标点和当前位置自动计算
         """
         msg = command_lcmt.decode(data)
-        self.target_point = np.array(msg.target, dtype=np.float32)  # 目标点 [x, y]（只包含位置）
-        self.received_target_command = True  # 标记已收到目标点命令
+        new_target = np.array(msg.target, dtype=np.float32)
+        self.target_point_queue.append(new_target.tolist())
+        self.received_target_command = True
 
     def poll(self, cb=None):
         """

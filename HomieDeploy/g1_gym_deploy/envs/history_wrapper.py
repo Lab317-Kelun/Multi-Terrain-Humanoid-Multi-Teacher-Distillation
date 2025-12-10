@@ -45,20 +45,13 @@ class HistoryWrapper:
         # 历史配置（只维护 proprio 历史，与 MuJoCo 版本一致）
         self.obs_history_length = self.env.num_history_length  # 历史长度（10 步）
         # proprio 维度是动态的：45 或 48 维（取决于是否使用目标点命令）
-        # 使用最大维度 48 来初始化缓冲区，以支持动态切换
-        self.max_proprio_dim = 48  # 最大 proprio 维度（包含目标点相关观测）
-        self.num_obs_history = self.obs_history_length * self.max_proprio_dim  # 历史观测总维度（48 × 10 = 480）
+        # 根据实际观测维度动态调整历史缓冲区大小
+        self.current_proprio_dim = None  # 当前 proprio 维度（初始为 None，首次使用时确定）
+        self.num_obs_history = None  # 历史观测总维度（根据 current_proprio_dim 动态计算）
         
-        # 初始化历史观测缓冲区（只存储 proprio）
-        # 形状：[num_envs, num_obs_history]
-        # 例如：[1, 480] - 1 个环境，480 维 proprio 历史（使用最大维度以支持动态切换）
-        self.obs_history = torch.zeros(
-            self.env.num_envs, 
-            self.num_obs_history, 
-            dtype=torch.float,
-            device=self.env.device, 
-            requires_grad=False  # 不需要梯度（仅用于推理）
-        )
+        # 初始化历史观测缓冲区（初始为空，首次使用时根据实际观测维度创建）
+        # 形状：[num_envs, num_obs_history]，其中 num_obs_history = current_proprio_dim × obs_history_length
+        self.obs_history = None
 
     def step(self, action):
         """
@@ -81,47 +74,21 @@ class HistoryWrapper:
         # proprio 维度 = 当前观测维度 - (225 heights + 3 priv_explicit + 29 priv_latent)
         current_proprio_dim = obs.shape[1] - (225 + 3 + 29)
         
-        # 提取 proprio 部分（前 current_proprio_dim 维）
+        # 检查观测维度是否改变，如果改变则重新初始化历史缓冲区
+        if self.current_proprio_dim is None:
+            # 观测维度改变，重新初始化历史缓冲区
+            self.current_proprio_dim = current_proprio_dim
+            self.num_obs_history = self.obs_history_length * self.current_proprio_dim
+            self.obs_history = torch.zeros(
+                self.env.num_envs,
+                self.num_obs_history,
+                dtype=torch.float,
+                device=self.env.device,
+                requires_grad=False
+            )
+        
         proprio_obs = obs[:, :current_proprio_dim]
-        
-        # 如果当前维度小于最大维度，需要填充到最大维度
-        if current_proprio_dim < self.max_proprio_dim:
-            padding = torch.zeros(obs.shape[0], self.max_proprio_dim - current_proprio_dim, 
-                                 device=obs.device, dtype=obs.dtype)
-            proprio_obs = torch.cat([proprio_obs, padding], dim=-1)
-        
-        # 更新历史观测：滑动窗口（只维护 proprio 历史）
-        # 移除最旧的 proprio 观测（前 max_proprio_dim 维），添加新的（后 max_proprio_dim 维）
-        self.obs_history = torch.cat((self.obs_history[:, self.max_proprio_dim:], proprio_obs), dim=-1)
-        
-        # 拼接完整观测：当前观测 + proprio历史
-        # 如果使用目标点命令：305 + 480 = 785 维
-        # 否则：302 + 480 = 782 维（但实际只使用前 450 维历史）
-        full_obs = torch.cat((obs, self.obs_history), dim=-1)
-        
-        return {'obs': obs, 'obs_history': full_obs}
-
-    def get_observations(self):
-        """
-        获取观测（不执行动作）
-        
-        @return 字典，包含当前观测和完整观测
-        
-        注意：此方法会更新历史观测，但不执行动作
-        """
-        obs = self.env.get_observations()
-        # 动态获取当前 proprio 维度
-        current_proprio_dim = obs.shape[1] - (225 + 3 + 29)
-        # 提取 proprio 部分
-        proprio_obs = obs[:, :current_proprio_dim]
-        # 如果当前维度小于最大维度，需要填充
-        if current_proprio_dim < self.max_proprio_dim:
-            padding = torch.zeros(obs.shape[0], self.max_proprio_dim - current_proprio_dim, 
-                                 device=obs.device, dtype=obs.dtype)
-            proprio_obs = torch.cat([proprio_obs, padding], dim=-1)
-        # 更新历史观测（滑动窗口）
-        self.obs_history = torch.cat((self.obs_history[:, self.max_proprio_dim:], proprio_obs), dim=-1)
-        # 拼接完整观测
+        self.obs_history = torch.cat((self.obs_history[:, :current_proprio_dim], proprio_obs), dim=-1)
         full_obs = torch.cat((obs, self.obs_history), dim=-1)
         return {'obs': obs, 'obs_history': full_obs}
 
@@ -136,15 +103,23 @@ class HistoryWrapper:
         obs = self.env.get_obs()
         # 动态获取当前 proprio 维度
         current_proprio_dim = obs.shape[1] - (225 + 3 + 29)
+        
+        # 检查观测维度是否改变，如果改变则重新初始化历史缓冲区
+        if self.current_proprio_dim is None or self.current_proprio_dim != current_proprio_dim:
+            self.current_proprio_dim = current_proprio_dim
+            self.num_obs_history = self.obs_history_length * self.current_proprio_dim
+            self.obs_history = torch.zeros(
+                self.env.num_envs,
+                self.num_obs_history,
+                dtype=torch.float,
+                device=self.env.device,
+                requires_grad=False
+            )
+        
         # 提取 proprio 部分
         proprio_obs = obs[:, :current_proprio_dim]
-        # 如果当前维度小于最大维度，需要填充
-        if current_proprio_dim < self.max_proprio_dim:
-            padding = torch.zeros(obs.shape[0], self.max_proprio_dim - current_proprio_dim, 
-                                 device=obs.device, dtype=obs.dtype)
-            proprio_obs = torch.cat([proprio_obs, padding], dim=-1)
         # 更新历史观测（滑动窗口）
-        self.obs_history = torch.cat((self.obs_history[:, self.max_proprio_dim:], proprio_obs), dim=-1)
+        self.obs_history = torch.cat((self.obs_history[:, self.current_proprio_dim:], proprio_obs), dim=-1)
         # 拼接完整观测
         full_obs = torch.cat((obs, self.obs_history), dim=-1)
         return {'obs': obs, 'obs_history': full_obs}
@@ -161,9 +136,23 @@ class HistoryWrapper:
         3. 返回初始观测和零历史
         """
         ret = self.env.reset()
-        # 清空历史观测（全部设为 0）
-        self.obs_history[:, :] = 0
-        return {"obs": ret, "obs_history": self.obs_history}
+        # 清空历史观测（如果已初始化）
+        if self.obs_history is not None:
+            self.obs_history[:, :] = 0
+        else:
+            # 如果历史缓冲区未初始化，根据当前观测维度初始化
+            if isinstance(ret, torch.Tensor):
+                current_proprio_dim = ret.shape[1] - (225 + 3 + 29)
+                self.current_proprio_dim = current_proprio_dim
+                self.num_obs_history = self.obs_history_length * self.current_proprio_dim
+                self.obs_history = torch.zeros(
+                    self.env.num_envs,
+                    self.num_obs_history,
+                    dtype=torch.float,
+                    device=self.env.device,
+                    requires_grad=False
+                )
+        return {"obs": ret, "obs_history": self.obs_history if self.obs_history is not None else torch.zeros(self.env.num_envs, 0, device=self.env.device)}
 
     def __getattr__(self, name):
         """
