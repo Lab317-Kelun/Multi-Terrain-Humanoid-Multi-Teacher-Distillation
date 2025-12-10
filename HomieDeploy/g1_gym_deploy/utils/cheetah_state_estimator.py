@@ -136,7 +136,10 @@ class StateEstimator:
         # 速度命令 [vx, vy, vyaw, height]
         self.command = np.zeros(4)
         self.command[3] = 0.74  # 默认高度（单位：米）
-        self.received_pedal_command = False  # 是否收到过 pedal_command
+        
+        # 目标点命令 [target_x, target_y]（只包含位置，不包含朝向）
+        self.target_point = np.zeros(2)  # 目标点 [x, y]
+        self.received_target_command = False  # 是否收到过目标点命令（pedal_command）
         
 
     def get_gravity_vector(self):
@@ -168,18 +171,59 @@ class StateEstimator:
           - height: 目标高度（m）
         
         优先级：
-        1. 如果收到过 pedal_command，使用 pedal_command（外部程序提供的精确命令）
+        1. 如果收到过目标点命令（pedal_command），根据目标点和当前位置计算速度命令
         2. 否则，从摇杆计算命令
+        
+        注意：如果收到目标点命令，会启用 delta_yaw, delta_pose_x, delta_pose_y 三个观测
         """
-        # 如果收到过 pedal_command，优先使用它
-        if self.received_pedal_command:
-            return self.command
+        # 如果收到过目标点命令，根据目标点和当前位置计算速度命令
+        if self.received_target_command:
+            # 获取当前位置和朝向
+            current_pos = self.base_pos[:2]  # [x, y]
+            current_yaw = self.euler[2]  # yaw
+            
+            # 计算到目标点的方向向量
+            target_vec = self.target_point - current_pos
+            distance = np.linalg.norm(target_vec)
+            
+            # 计算目标朝向（从当前位置指向目标点的角度）
+            target_yaw = np.arctan2(target_vec[1], target_vec[0])
+            
+            # 计算 delta_yaw（当前朝向到目标朝向的差值）
+            delta_yaw = np.arctan2(np.sin(target_yaw - current_yaw), np.cos(target_yaw - current_yaw))
+            
+            # 根据距离和角度计算速度命令
+            # 前进速度：根据距离和朝向误差计算
+            max_vel = 0.8  # 最大前进速度
+            cmd_x = max_vel * np.cos(delta_yaw) * np.clip(distance / 2.0, 0.0, 1.0)  # 距离越远速度越大，但有上限
+            
+            # 侧向速度：根据侧向误差计算
+            lateral_error = distance * np.sin(delta_yaw)
+            max_lateral_vel = 0.4
+            cmd_y = np.clip(lateral_error * 0.5, -max_lateral_vel, max_lateral_vel)
+            
+            # 角速度：根据朝向误差计算
+            max_yaw_vel = 0.4
+            cmd_yaw = np.clip(delta_yaw * 2.0, -max_yaw_vel, max_yaw_vel)
+            
+            cmd_height = 0.74  # 固定高度
+            
+            return np.array([cmd_x, cmd_y, cmd_yaw, cmd_height], dtype=np.float32)
         
         # 从摇杆计算速度命令
-        cmd_x = 0.6 * self.left_stick[1]      # 前进速度：左摇杆 Y 轴（向上推为正）
-        cmd_y = -0.5 * self.left_stick[0]     # 侧向速度：左摇杆 X 轴（向右推为正）
-        cmd_yaw = -0.8 * self.right_stick[0]  # 偏航角速度：右摇杆 X 轴（向右推为正）
-        cmd_height = 0.74 - 0.54 * self.right_stick[1]  # 目标高度：右摇杆 Y 轴（向上推为高）
+        # 系数确定方式：
+        # 1. 根据训练时的命令范围（训练代码中的 lin_vel_x, lin_vel_y, ang_vel_yaw 范围）
+        # 2. 根据机器人的实际运动能力（最大安全速度）
+        # 3. 根据操作体验（摇杆满量程对应合理的最大速度）
+        # 摇杆输入范围：[-1, 1]，映射到实际速度命令
+        cmd_x = 0.8 * self.left_stick[1]      # 前进速度：左摇杆 Y 轴（向上推为正，向下推为负）
+                                              # 系数 0.6：最大前进速度 0.6 m/s（摇杆满量程时）
+        cmd_y = -0.4 * self.left_stick[0]     # 侧向速度：左摇杆 X 轴（向右推为正）
+                                              # 系数 -0.5：最大侧向速度 0.5 m/s（负号用于方向映射）
+        cmd_yaw = -0.4 * self.right_stick[0]  # 偏航角速度：右摇杆 X 轴（向右推为正）
+                                              # 系数 -0.8：最大偏航角速度 0.8 rad/s（约 45°/s）
+        cmd_height = 0.74                      # 目标高度：固定为 0.74m（不再使用右摇杆 Y 轴）
+                                              # 固定值：与训练时的 base_height_target 一致
         
         return np.array([cmd_x, cmd_y, cmd_yaw, cmd_height], dtype=np.float32)
 
@@ -261,6 +305,23 @@ class StateEstimator:
                 pass
         
         return self.base_pos
+    
+    def get_target_point(self):
+        """
+        获取目标点命令
+        
+        @return 目标点 [target_x, target_y]（单位：m, m）
+        注意：只包含位置，不包含朝向。delta_yaw 需要根据当前位置和朝向计算
+        """
+        return self.target_point
+    
+    def has_target_command(self):
+        """
+        检查是否收到目标点命令
+        
+        @return True 如果收到目标点命令，False 否则
+        """
+        return self.received_target_command
     
     def enable_tf_position(self, tf_buffer, tf_listener):
         """
@@ -368,17 +429,21 @@ class StateEstimator:
 
     def _pedal_command_cb(self, channel, data):
         """
-        LCM 回调函数：处理踏板命令（速度指令）
+        LCM 回调函数：处理目标点命令
         
         @param channel LCM 通道名称
         @param data 消息数据（二进制）
         
         消息来源：外部发布的 "pedal_command"
-        消息内容：速度命令 [vx, vy, vyaw, height]
+        消息内容：目标点 [target_x, target_y]（只包含位置，不包含朝向）
+        
+        功能：
+        - 如果收到此消息，会启用 delta_yaw, delta_pose_x, delta_pose_y 三个观测
+        - delta_yaw 和速度命令会根据目标点和当前位置自动计算
         """
         msg = command_lcmt.decode(data)
-        self.command = msg.command  # 速度命令 [vx, vy, vyaw, height]
-        self.received_pedal_command = True  # 标记已收到 pedal_command
+        self.target_point = np.array(msg.target, dtype=np.float32)  # 目标点 [x, y]（只包含位置）
+        self.received_target_command = True  # 标记已收到目标点命令
 
     def poll(self, cb=None):
         """

@@ -1,22 +1,22 @@
 /**
- * 速度命令 LCM 消息定义
+ * 目标点命令 LCM 消息定义
  * 通道："pedal_command"
  * 发布者：外部程序（可选，当前代码中无发布者）
  * 订阅者：Python 程序 (cheetah_state_estimator.py)
  * 
- * 功能：提供高级速度命令（用于策略网络的命令输入）
+ * 功能：提供目标点命令（用于导航控制）
  * 
  * 说明：
  * - 这是一个可选的通道，可以由外部程序（如 GUI 界面、脚本、或其他控制程序）发布
- * - 当前代码中没有任何地方发布此消息，如果没有收到消息，命令默认为 [0, 0, 0, 0]
- * - 遥控器发布的是 "rc_command" 通道（rc_command_lcmt），不是此通道
- * - 如果收到此消息，会覆盖默认命令，用于提供精确的速度控制
+ * - 如果收到此消息，会启用 delta_yaw, delta_pose_x, delta_pose_y 三个观测
+ * - 目标点命令只包含位置（x, y），delta_yaw 和速度命令由代码自动计算
+ * - 遥控器发布的是 "rc_command" 通道（rc_command_lcmt），用于速度控制
+ * - 如果收到此消息，会计算机器人当前位置与目标点的差值，用于导航
  */
 struct command_lcmt
 {
-    double command[4];         // 速度命令 [vx, vy, vyaw, height]
-                               // vx: 前进速度（m/s）
-                               // vy: 侧向速度（m/s）
-                               // vyaw: 偏航角速度（rad/s）
-                               // height: 目标高度（m）
+    double target[2];          // 目标点 [target_x, target_y]
+                               // target_x: 目标位置 X（m，世界坐标系）
+                               // target_y: 目标位置 Y（m，世界坐标系）
+                               // 注意：delta_yaw 和速度命令由代码根据目标点和当前位置自动计算
 }
