@@ -22,6 +22,16 @@ from lcm_types.arm_action_lcmt import arm_action_lcmt
 from utils.command_profile import RCControllerProfile
 from lcm_types.body_record_lcmt import body_record_lcmt
 
+# ROS1 相关导入（可选，如果未安装 ROS1 则跳过）
+try:
+    import rospy
+    from utils.heightmap_subscriber import HeightMapSubscriber
+    ROS1_AVAILABLE = True
+except ImportError:
+    ROS1_AVAILABLE = False
+    rospy = None
+    HeightMapSubscriber = None
+
 # 初始化 LCM 通信（UDP 多播，与 C++ 程序通信）
 lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=255")
 
@@ -44,9 +54,9 @@ class LCMAgent():
         # 环境配置
         self.num_envs = 1              # 环境数量（单机器人）
         self.num_dofs = 27             # 总关节数（27个：腿12 + 腰3 + 臂12）
-        # 观测维度：48(proprio) + 225(heights) + 3(priv_explicit) + 29(priv_latent) = 305
+        # 观测维度：48(proprio) + 225(heights, 15×15) + 3(priv_explicit) + 29(priv_latent) = 305
         # 完整观测（包含历史）：305 + 10*48 = 785
-        self.num_obs = 48 + 225 + 3 + 29  # 单步观测维度：305
+        self.num_obs = 48 + 225 + 3 + 29  # 单步观测维度：305（高度图是 15×15 = 225）
         self.num_history_length = 10   # 历史长度（用于 HistoryWrapper，与 MuJoCo 一致）
         self.num_lower_dofs = 12       # 下肢关节数（左右腿各 6 个）
         self.num_commands = 4          # 命令维度：[vx, vy, vyaw, height]
@@ -84,6 +94,28 @@ class LCMAgent():
         self.torques = np.zeros(self.num_dofs + 2, dtype=np.float32)            # 前馈力矩（29个，当前全为 0）
 
         self.joint_idxs = self.se.joint_idxs  # 关节索引映射
+        
+        # 高度图订阅器（ROS1，可选）
+        # 注意：rospy 节点应该在主程序入口（deploy_policy.py）初始化，这里不再重复初始化
+        self.heightmap_subscriber = None
+        if ROS1_AVAILABLE:
+            try:
+                # 创建高度图订阅器（假设 rospy 节点已在主程序中初始化）
+                self.heightmap_subscriber = HeightMapSubscriber()
+                
+                # 启用 StateEstimator 使用 TF 获取位置
+                self.se.enable_tf_position(
+                    self.heightmap_subscriber.tf_buffer,
+                    self.heightmap_subscriber.tf_listener
+                )
+                
+                print("HeightMapSubscriber initialized successfully.")
+            except Exception as e:
+                print(f"Warning: Failed to initialize HeightMapSubscriber: {e}")
+                print("Heightmap will use default values (robot Z coordinate).")
+                self.heightmap_subscriber = None
+        else:
+            print("Warning: ROS1 not available. Heightmap will use default values.")
 
 
     def get_obs(self):
@@ -101,7 +133,7 @@ class LCMAgent():
            - (dof_pos[:12] - default_angles) * 1.0
            - dof_vel[:12] * 0.05
            - action_history(12)
-        2. 高度图（225维）：用机器人的 z 坐标填充
+        2. 高度图（225维，15×15）：机器人 Z - 地面高度（与训练代码一致）
         3. 特权信息（3+29=32维）：全为 0
         
         总维度：48 + 225 + 3 + 29 = 305
@@ -157,8 +189,22 @@ class LCMAgent():
         proprio_obs[idx:idx+12] = self.actions.cpu().numpy()
         idx += 12
         
-        # 高度图（225维）：用机器人的 z 坐标填充
-        heights = np.full(225, base_pos[2], dtype=np.float32)
+        # 高度图（225维，15×15）：从 ROS1 话题获取真实高度图，如果失败则使用默认值
+        # 高度值 = 机器人 Z - 地面高度（与训练代码一致）
+        if self.heightmap_subscriber is not None:
+            try:
+                heights = self.heightmap_subscriber.get_heightmap()
+                if heights is None or heights.shape[0] != 225:
+                    # 如果高度图未准备好或尺寸不对，使用默认值（机器人 Z 坐标）
+                    heights = np.full(225, base_pos[2], dtype=np.float32)
+            except Exception as e:
+                # 异常处理：使用默认值
+                if ROS1_AVAILABLE:
+                    rospy.logwarn_throttle(1.0, f"Failed to get heightmap: {e}. Using default.")
+                heights = np.full(225, base_pos[2], dtype=np.float32)
+        else:
+            # ROS1 不可用，使用默认值
+            heights = np.full(225, base_pos[2], dtype=np.float32)
         
         # 特权信息（3+29=32维）：全为 0
         priv_explicit = np.zeros(3, dtype=np.float32)

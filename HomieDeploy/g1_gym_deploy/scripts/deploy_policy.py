@@ -28,6 +28,21 @@ import os
 
 # os.environ["LCM_DEFAULT_URL"] = "eth0"
 
+# 初始化 ROS1 节点（如果 ROS1 可用，只初始化一次）
+# 注意：运行此脚本前需要 source ROS 环境：
+#   source /opt/ros/noetic/setup.bash
+#   source ~/catkin_ws/devel/setup.bash  # 如果高度图包在 catkin_ws 中
+try:
+    import rospy
+    # 检查是否已初始化，避免重复初始化
+    try:
+        rospy.get_node_uri()
+    except:
+        rospy.init_node('g1_gym_deploy', anonymous=True)
+        print("ROS1 node initialized.")
+except ImportError:
+    pass  # ROS1 不可用，跳过
+
 # 初始化 LCM 通信（UDP 多播，用于与 C++ 程序通信）
 lc = lcm.LCM("udpm://239.255.76.67:7667?ttl=255")
 

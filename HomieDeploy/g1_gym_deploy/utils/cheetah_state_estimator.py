@@ -103,6 +103,9 @@ class StateEstimator:
         self.buf_idx = 0                            # 缓冲区索引（用于平滑）
         self.imu_ang_vel = np.zeros(3)              # IMU 角速度（未使用，直接使用 body_ang_vel）
         self.base_pos = np.zeros(3)                 # 机器人位置 [x, y, z]（世界坐标系）
+        self.use_tf_for_position = False           # 是否使用 TF 获取位置（需要 ROS1）
+        self.tf_buffer = None                       # TF 缓冲区（如果使用 ROS1）
+        self.tf_listener = None                     # TF 监听器（如果使用 ROS1）
         
         # 遥控器状态
         self.left_stick = [0, 0]                    # 左摇杆 [x, y]
@@ -228,9 +231,47 @@ class StateEstimator:
         """
         获取机器人位置（世界坐标系）
         
+        如果 use_tf_for_position=True，则通过 TF 获取真实位置
+        否则返回 LCM 消息中的位置（可能为 0）
+        
         @return 机器人位置 [x, y, z]（单位：米）
         """
+        # 如果使用 TF 获取位置，且 TF 已初始化
+        if self.use_tf_for_position and self.tf_buffer is not None:
+            try:
+                import rospy
+                transform = self.tf_buffer.lookup_transform(
+                    'odom_corrected',  # 目标坐标系
+                    'torso_link',      # 源坐标系
+                    rospy.Time(0),
+                    rospy.Duration(0.1)
+                )
+                self.base_pos = np.array([
+                    transform.transform.translation.x,
+                    transform.transform.translation.y,
+                    transform.transform.translation.z
+                ], dtype=np.float32)
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException) as e:
+                # TF 查询失败，使用默认值或 LCM 消息中的值
+                # 不打印警告，因为可能频繁失败（TF 未初始化等）
+                pass
+            except Exception as e:
+                # 其他异常（如 rospy 未导入）
+                pass
+        
         return self.base_pos
+    
+    def enable_tf_position(self, tf_buffer, tf_listener):
+        """
+        启用通过 TF 获取机器人位置
+        
+        @param tf_buffer: tf2_ros.Buffer 对象
+        @param tf_listener: tf2_ros.TransformListener 对象
+        """
+        self.use_tf_for_position = True
+        self.tf_buffer = tf_buffer
+        self.tf_listener = tf_listener
 
     def get_arm_action(self):
         """
