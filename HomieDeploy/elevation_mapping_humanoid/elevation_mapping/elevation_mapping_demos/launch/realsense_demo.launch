@@ -1,0 +1,37 @@
+<launch>
+  <!-- <include file="$(find realsense2_camera)/launch/demo_pointcloud.launch" /> -->
+  <include file="$(find livox_ros_driver2)/launch_ROS1/msg_MID360.launch" />
+  <include file="$(find fast_lio)/launch/mapping_mid360.launch" />
+  <include file="$(find pose_publisher)/launch/pose_publisher.launch" />
+  <node pkg="elevation_mapping_demos" type="pc_filter.py" name="pc_filter" />
+  <node pkg="elevation_mapping_demos" type="publish_map_frame.py" name="publish_map_frame" />
+  <node pkg="elevation_mapping_demos" type="gravity_correction_publisher.py" name="gravity_correction_publisher" />
+  <!-- Elevation mapping node -->
+  <node pkg="elevation_mapping" type="elevation_mapping" name="elevation_mapping" output="screen">
+    <rosparam command="load" file="$(find elevation_mapping_demos)/config/robots/simple_demo_robot.yaml" />
+    <!-- <rosparam command="load" file="$(find elevation_mapping_demos)/config/elevation_maps/remove_object.yaml" /> -->
+    <rosparam command="load" file="$(find elevation_mapping)/config/sensor_processors/realsense_d435.yaml" />
+    <rosparam command="load" file="$(find elevation_mapping_demos)/config/postprocessing/postprocessor_pipeline.yaml" />
+  </node>
+
+  <!-- Launch visualizations for the resulting elevation map -->
+  <include file="$(find elevation_mapping_demos)/launch/visualization.launch" />
+
+  <!-- Launch RViz with the demo configuration -->
+
+
+  <!-- ========== NEW: Realsense2 + pointcloud ========== -->
+  <!-- 1) launch the D435 camera with pointcloud filter -->
+  <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="filters" value="pointcloud"/>
+  </include> -->
+
+  <!-- 2) standalone nodelet to convert depth → PointCloud2 -->
+  <!-- <node pkg="nodelet" type="nodelet" name="depth_point_cloud_nodelet" output="screen"
+        args="standalone depth_image_proc/point_cloud_xyz \
+              camera_info:=/camera/depth/camera_info \
+              image_rect:=/camera/depth/image_rect_raw" /> -->
+
+
+
+</launch>
