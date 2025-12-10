@@ -198,6 +198,8 @@ class MultiStudentTeacher(nn.Module):
 
     @property
     def action_std(self) -> torch.Tensor:
+        if self.distribution is None:
+            raise ValueError("Action distribution has not been initialized. Call _update_distribution first.")
         return self.distribution.stddev
 
     @property

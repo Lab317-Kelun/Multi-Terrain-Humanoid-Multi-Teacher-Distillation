@@ -179,7 +179,8 @@ class HumanoidRobot(BaseTask):
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
         self.extras["delta_yaw_ok"] = self.delta_yaw < 0.6
         if hasattr(self, "env_class"):
-            print("terrain_ids=",self.env_class)
+            torch.set_printoptions(threshold=float('inf'))
+            #print("terrain_ids=", self.env_class)
             self.extras["terrain_ids"] = self.env_class.clone()
             
         else:
