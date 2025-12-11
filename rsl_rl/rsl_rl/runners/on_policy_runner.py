@@ -162,6 +162,11 @@ class OnPolicyRunner:
                     task_reward_lerp=amp_task_reward_lerp,
                     use_lerp=use_lerp,
                 )
+                try:
+                    from rsl_rl.utils.normalizer import Normalizer
+                    amp_normalizer = Normalizer(shape=(num_frames * state_dim,), device=self.device)
+                except Exception as e:
+                    amp_normalizer = None
                 # 构建专家数据加载器（使用现成的 G1_AMPLoader）
                 try:
                     from legged_gym.datasets.motion_loader_g1 import G1_AMPLoader
@@ -195,7 +200,7 @@ class OnPolicyRunner:
         for k in [
             'amp_reward_mode', 'amp_reward_coef', 'num_amp_frames',
             'amp_num_preload_transitions', 'use_lerp', 'amp_task_reward_lerp',
-            'amp_discr_hidden_dims', 'amp_loader_type'
+            'amp_discr_hidden_dims', 'amp_loader_type', 'amp_input_noise_std', 'amp_gp_coef'
         ]:
             if k in runner_cfg:
                 amp_params[k] = runner_cfg[k]
@@ -291,7 +296,11 @@ class OnPolicyRunner:
                     amp_frames = None
                     if getattr(self.alg, 'use_amp', False):
                         try:
-                            amp_frames = self.alg.build_amp_policy_frames(obs)
+                            num_frames = int(self.cfg.get('num_amp_frames', 2))
+                            if hasattr(self.env, 'get_amp_policy_frames'):
+                                amp_frames = self.env.get_amp_policy_frames(num_frames)
+                            else:
+                                amp_frames = self.alg.build_amp_policy_frames(obs)
                         except Exception as e:
                             amp_frames = None
                             print(f"[Runner] AMP frames build failed: {e}")
@@ -490,6 +499,15 @@ class OnPolicyRunner:
         # 记录最近一次 AMP 奖励均值（若启用并且算法提供）
         if hasattr(self.alg, 'use_amp') and self.alg.use_amp and hasattr(self.alg, 'last_amp_reward_mean'):
             wandb_dict['AMP/reward_mean'] = float(self.alg.last_amp_reward_mean)
+        if hasattr(self.alg, 'use_amp') and self.alg.use_amp:
+            if hasattr(self.alg, 'amp_policy_obs_min'):
+                wandb_dict['AMP/policy_obs_min'] = float(self.alg.amp_policy_obs_min)
+            if hasattr(self.alg, 'amp_policy_obs_max'):
+                wandb_dict['AMP/policy_obs_max'] = float(self.alg.amp_policy_obs_max)
+            if hasattr(self.alg, 'amp_expert_obs_min'):
+                wandb_dict['AMP/expert_obs_min'] = float(self.alg.amp_expert_obs_min)
+            if hasattr(self.alg, 'amp_expert_obs_max'):
+                wandb_dict['AMP/expert_obs_max'] = float(self.alg.amp_expert_obs_max)
         if len(locs['rewbuffer']) > 0:
             wandb_dict['Train/mean_reward'] = statistics.mean(locs['rewbuffer'])
             wandb_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
@@ -615,6 +633,16 @@ class OnPolicyRunner:
                 wandb_dict['AMP/expert_score_std'] = float(self.alg.disc_expert_score_std)
             if hasattr(self.alg, 'demo_acc_last'):
                 wandb_dict['AMP/demo_accuracy'] = float(self.alg.demo_acc_last)
+            if hasattr(self.alg, 'amp_disc_loss_total'):
+                wandb_dict['AMP/disc_loss_total'] = float(self.alg.amp_disc_loss_total)
+            if hasattr(self.alg, 'amp_disc_loss_cls'):
+                wandb_dict['AMP/disc_loss_cls'] = float(self.alg.amp_disc_loss_cls)
+            if hasattr(self.alg, 'amp_disc_grad_pen'):
+                wandb_dict['AMP/disc_grad_pen'] = float(self.alg.amp_disc_grad_pen)
+            if hasattr(self.alg, 'amp_disc_logit_reg'):
+                wandb_dict['AMP/disc_logit_reg'] = float(self.alg.amp_disc_logit_reg)
+            if hasattr(self.alg, 'amp_disc_weight_decay'):
+                wandb_dict['AMP/disc_weight_decay'] = float(self.alg.amp_disc_weight_decay)
         
         # 双Critic的额外loss
         if 'mean_value_loss_dense' in locs:

@@ -70,7 +70,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         # AMP 相关配置（不使用深度相机，但保留接口）
         amp_motion_files = '/home/cft/zikang/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/resources/g1_amp_data/lafan_walk+run_50FPS'   # 可选：专家运动数据路径列表，留空表示不使用外部专家数据
-        num_amp_obs = num_actions  # 判别器输入维度，默认使用动作控制的下肢关节数
+        num_amp_obs = 30  # 判别器输入维度：12关节位置+12关节速度+基座线/角速度(6)
         reference_state_initialization = True
         reference_state_initialization_prob = 0.85
         
@@ -430,7 +430,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         policy_learning_rate = 2e-4
         
         amp_replay_buffer_size = 100000
-        disc_learning_rate = 1e-3
+        disc_learning_rate = 5e-4
         
     class runner(LeggedRobotCfgPPO.runner):
         """训练运行器配置"""
@@ -450,12 +450,14 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
 
         # AMP 相关统一配置（算法从此处读取）
         amp_reward_mode = 'quadratic'     # 可选: 'quadratic' | 'gail' | 'tanh' | 'sigmoid'
-        amp_reward_coef = 3.0            # 判别器奖励系数（代替 amp_reward_weight）
+        amp_reward_coef = 3.0            # 判别器奖励系数（可按训练稳定性再调）
         num_amp_frames = 5               # AMP 判别器状态序列帧数
         amp_num_preload_transitions = 1000
         use_lerp = False                 # 不启用lerp
         amp_task_reward_lerp = 0.0       # 插值权重，0表示仅判别器奖励，1表示仅任务奖励
-        amp_discr_hidden_dims = [1024, 512]
+        amp_discr_hidden_dims = [512, 256]
+        amp_input_noise_std = 0.02       # 判别器输入噪声（高斯）
+        amp_gp_coef = 10.0               # 判别器梯度惩罚系数（Lipschitz约束）
 
     class estimator(LeggedRobotCfgPPO.estimator):
         """状态估计器配置"""

@@ -139,6 +139,8 @@ class PPODoubleReward:
         self.num_amp_frames = num_amp_frames
         self.use_amp = use_amp
         self.amp_reward_mode = amp_reward_mode
+        self.amp_input_noise_std = float(kwargs.get('amp_input_noise_std', 0.02))
+        self.amp_gp_coef = float(kwargs.get('amp_gp_coef', 10.0))
         # 兼容旧参数名 amp_reward_weight（若存在则覆盖）
         legacy_weight = kwargs.get('amp_reward_weight', None)
         self.amp_reward_coef = legacy_weight if legacy_weight is not None else amp_reward_coef
@@ -267,7 +269,13 @@ class PPODoubleReward:
             # 2) 计算判别器输出与模仿奖励
             if amp_obs_frames is not None:
                 with torch.no_grad():
-                    d_out = self.discriminator(amp_obs_frames.flatten(1))
+                    if self.amp_normalizer is not None:
+                        frames_flat = self.amp_normalizer.normalize_torch(amp_obs_frames.flatten(1), self.device)
+                    else:
+                        frames_flat = amp_obs_frames.flatten(1)
+                    if self.amp_input_noise_std > 0.0:
+                        frames_flat = frames_flat + self.amp_input_noise_std * torch.randn_like(frames_flat)
+                    d_out = self.discriminator(frames_flat)
                     if self.amp_reward_mode == 'quadratic':
                         # 与 AMPDiscriminatorMulti.predict_amp_reward 保持一致的判别器奖励形式
                         disc_reward = self.amp_reward_coef * torch.clamp(1.0 - 0.25 * torch.square(d_out - 1.0), min=0.0)
@@ -360,6 +368,12 @@ class PPODoubleReward:
             exp_score_std_acc = 0.0
             demo_acc_acc = 0.0
             num_disc_updates = 0
+            disc_total_acc = 0.0
+            disc_cls_acc = 0.0
+            grad_pen_acc = 0.0
+            disc_logit_acc = 0.0
+            weight_decay_acc = 0.0
+            logged_obs_stats = False
             if self.amp_storage is not None and self.amp_data is not None:
                 amp_policy_generator = self.amp_storage.feed_forward_generator(
                     self.num_learning_epochs * self.num_mini_batches,
@@ -374,21 +388,40 @@ class PPODoubleReward:
                 amp_policy_generator = []
                 amp_expert_generator = []
             for sample_amp_policy, sample_amp_expert in zip(amp_policy_generator, amp_expert_generator):
-                expert_states = sample_amp_expert.to(self.device)
-                policy_states = sample_amp_policy
+                raw_expert = sample_amp_expert.to(self.device)
+                raw_policy = sample_amp_policy
+                if not logged_obs_stats:
+                    try:
+                        self.amp_policy_obs_min = float(raw_policy.min().item())
+                        self.amp_policy_obs_max = float(raw_policy.max().item())
+                        self.amp_expert_obs_min = float(raw_expert.min().item())
+                        self.amp_expert_obs_max = float(raw_expert.max().item())
+                        print(f"[AMP] policy_amp_obs shape={tuple(raw_policy.shape)} min={self.amp_policy_obs_min:.4f} max={self.amp_policy_obs_max:.4f}")
+                        print(f"[AMP] expert_amp_obs shape={tuple(raw_expert.shape)} min={self.amp_expert_obs_min:.4f} max={self.amp_expert_obs_max:.4f}")
+                    except Exception:
+                        pass
+                    logged_obs_stats = True
+                policy_flat = raw_policy.flatten(1)
+                expert_flat = raw_expert.flatten(1)
                 if self.amp_normalizer is not None:
                     with torch.no_grad():
-                        expert_states = self.amp_normalizer.normalize_torch(expert_states, self.device)
-                        policy_states = self.amp_normalizer.normalize_torch(policy_states, self.device)
-                policy_d = self.discriminator(policy_states.flatten(1))
-                expert_d = self.discriminator(expert_states.flatten(1))
+                        expert_flat = self.amp_normalizer.normalize_torch(expert_flat, self.device)
+                        policy_flat = self.amp_normalizer.normalize_torch(policy_flat, self.device)
+                if self.amp_input_noise_std > 0.0:
+                    policy_flat_noisy = policy_flat + self.amp_input_noise_std * torch.randn_like(policy_flat)
+                    expert_flat_noisy = expert_flat + self.amp_input_noise_std * torch.randn_like(expert_flat)
+                else:
+                    policy_flat_noisy = policy_flat
+                    expert_flat_noisy = expert_flat
+                policy_d = self.discriminator(policy_flat_noisy)
+                expert_d = self.discriminator(expert_flat_noisy)
                 agent_acc = (policy_d < 0).float().mean()
                 demo_acc = (expert_d > 0).float().mean()
                 # MSE 目标与正则（与 amp_ppo_multi 保持一致）
                 expert_loss = torch.nn.MSELoss()(expert_d, torch.ones_like(expert_d, device=self.device))
                 policy_loss = torch.nn.MSELoss()(policy_d, -1 * torch.ones_like(policy_d, device=self.device))
                 amp_loss = 0.5 * (expert_loss + policy_loss)
-                grad_pen_loss = self.discriminator.compute_grad_pen(expert_states, lambda_=5)
+                grad_pen_loss = self.discriminator.compute_grad_pen(raw_expert, lambda_=self.amp_gp_coef)
                 logit_weights = self.discriminator.get_disc_logit_weights()
                 disc_logit_loss = 0.01 * torch.sum(torch.square(logit_weights))
                 disc_weights = torch.cat(self.discriminator.get_disc_weights(), dim=-1)
@@ -399,10 +432,15 @@ class PPODoubleReward:
                 nn.utils.clip_grad_norm_(self.discriminator.parameters(), self.max_grad_norm)
                 self.optimizer_disc.step()
                 if self.amp_normalizer is not None:
-                    self.amp_normalizer.update(policy_states.cpu().numpy())
-                    self.amp_normalizer.update(expert_states.cpu().numpy())
+                    self.amp_normalizer.update(policy_flat.cpu().numpy())
+                    self.amp_normalizer.update(expert_flat.cpu().numpy())
                 mean_discriminator_loss += amp_loss.item()
                 mean_discriminator_acc += agent_acc.mean().item()
+                disc_total_acc += disc_loss.item()
+                disc_cls_acc += amp_loss.item()
+                grad_pen_acc += grad_pen_loss.item()
+                disc_logit_acc += disc_logit_loss.item()
+                weight_decay_acc += disc_weight_decay.item()
 
                 # 累计分数统计用于 wandb
                 pol_score_mean_acc += policy_d.mean().item()
@@ -419,6 +457,11 @@ class PPODoubleReward:
                 self.disc_expert_score_mean = exp_score_mean_acc / num_disc_updates
                 self.disc_expert_score_std = exp_score_std_acc / num_disc_updates
                 self.demo_acc_last = demo_acc_acc / num_disc_updates
+                self.amp_disc_loss_total = disc_total_acc / num_disc_updates
+                self.amp_disc_loss_cls = disc_cls_acc / num_disc_updates
+                self.amp_disc_grad_pen = grad_pen_acc / num_disc_updates
+                self.amp_disc_logit_reg = disc_logit_acc / num_disc_updates
+                self.amp_disc_weight_decay = weight_decay_acc / num_disc_updates
         # 根据是否使用双Critic选择合适的generator
         if self.use_double_critic and hasattr(self.storage, 'mini_batch_generator_double'):
             generator = self.storage.mini_batch_generator_double(self.num_mini_batches, self.num_learning_epochs)

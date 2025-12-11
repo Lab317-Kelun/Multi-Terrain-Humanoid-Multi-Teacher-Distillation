@@ -246,11 +246,15 @@ class G1_AMPLoader:
                 idxs = np.random.choice(self.preloaded_frames[0].shape[0], size=mini_batch_size)
                 frames = []
                 for i in range(self.num_frames):
-                    s = self.preloaded_frames[i][idxs, 13:25]
+                    f = self.preloaded_frames[i][idxs]
+                    joint_pos_12 = f[:, 13:25]
+                    joint_vel_12 = f[:, 36:48]
+                    base_vel_6 = f[:, 7:13]
+                    s = torch.cat([joint_pos_12, joint_vel_12, base_vel_6], dim=-1)  # 30 dims
                     frames.append(s)
             else:
                 NotImplementedError('preload transition')
-            yield torch.stack(frames, dim=1)    # [batch, num_frames, 12]
+            yield torch.stack(frames, dim=1)    # [batch, num_frames, 30]
 
 
     def quaternion_to_euler_array(self, quat):

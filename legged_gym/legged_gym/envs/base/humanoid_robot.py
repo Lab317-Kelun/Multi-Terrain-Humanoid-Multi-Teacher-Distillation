@@ -92,11 +92,11 @@ class HumanoidRobot(BaseTask):
         self.num_amp_obs = getattr(self.cfg.env, 'num_amp_obs', 0)
         self.reference_state_initialization = getattr(self.cfg.env, 'reference_state_initialization', False)
         
-        # 选择用于 AMP 观测的关节索引：沿用下肢动作控制关节
-        if hasattr(self, 'leg_joint_indices') and hasattr(self, 'ankle_joint_indices'):
-            self._amp_dof_indices = torch.cat((self.leg_joint_indices, self.ankle_joint_indices))
+        if hasattr(self, 'left_leg_joint_indices') and hasattr(self, 'right_leg_joint_indices') and hasattr(self, 'ankle_joint_indices'):
+            left_order = torch.cat((self.left_leg_joint_indices, self.ankle_joint_indices[0].view(1)))
+            right_order = torch.cat((self.right_leg_joint_indices, self.ankle_joint_indices[1].view(1)))
+            self._amp_dof_indices = torch.cat((left_order, right_order))
         else:
-            # 兜底：若索引未构建，使用前 num_actions 个关节
             self._amp_dof_indices = torch.arange(self.cfg.env.num_actions, device=self.device, dtype=torch.long)
         
         if not self.headless:
@@ -241,12 +241,34 @@ class HumanoidRobot(BaseTask):
         return self.obs_history_buf
     
     def get_amp_observations(self):
-        """返回判别器观测（AMP），仅使用下肢关节位置。
-        不引入深度相机信息，接口与参考AMP环境兼容。
+        """返回判别器观测（AMP），包含姿态与动力学：
+        Joint_Pos(12)、Joint_Vel(12)、Base_LinVel(3)、Base_AngVel(3) 共30维，均为机体坐标系。
         """
         if getattr(self, 'num_amp_obs', 0) == 0:
             return None
-        return self.dof_pos[..., self._amp_dof_indices]
+        joint_pos = self.dof_pos[..., self._amp_dof_indices]
+        joint_vel = self.dof_vel[..., self._amp_dof_indices]
+        base_lv = self.base_lin_vel
+        base_av = self.base_ang_vel
+        return torch.cat([joint_pos, joint_vel, base_lv, base_av], dim=-1)
+
+    def get_amp_policy_frames(self, num_frames):
+        if getattr(self, 'num_amp_obs', 0) == 0:
+            return None
+        cur = self.get_amp_observations()
+        if not hasattr(self, 'amp_obs_history_buf'):
+            self.amp_obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, self.num_amp_obs, device=self.device)
+        take = max(num_frames - 1, 0)
+        if take > 0:
+            h = self.amp_obs_history_buf[:, -min(take, self.cfg.env.history_len):, :]
+        else:
+            h = cur.new_zeros((self.num_envs, 0, self.num_amp_obs))
+        frames = torch.cat([h, cur.unsqueeze(1)], dim=1)
+        if frames.shape[1] < num_frames:
+            pad_len = num_frames - frames.shape[1]
+            pad = cur.new_zeros((self.num_envs, pad_len, self.num_amp_obs))
+            frames = torch.cat([pad, frames], dim=1)
+        return frames
     
     def normalize_depth_image(self, depth_image):
         depth_image = depth_image * -1
@@ -361,7 +383,12 @@ class HumanoidRobot(BaseTask):
 
         self.update_depth_buffer()
 
-        self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
+        self.compute_observations()
+        if getattr(self, 'num_amp_obs', 0) > 0:
+            cur_amp = self.get_amp_observations()
+            if not hasattr(self, 'amp_obs_history_buf'):
+                self.amp_obs_history_buf = torch.zeros(self.num_envs, self.cfg.env.history_len, self.num_amp_obs, device=self.device)
+            self.amp_obs_history_buf = torch.cat([self.amp_obs_history_buf[:, 1:].clone(), cur_amp[:, None, :].clone()], dim=1)
 
         self.last_last_actions[:] = self.last_actions[:]
         self.last_actions[:] = self.actions[:]
@@ -500,6 +527,8 @@ class HumanoidRobot(BaseTask):
         self.obs_history_buf[env_ids, :, :] = 0.  # reset obs history buffer TODO no 0s
         self.contact_buf[env_ids, :, :] = 0.
         self.action_history_buf[env_ids, :, :] = 0.
+        if hasattr(self, 'amp_obs_history_buf'):
+            self.amp_obs_history_buf[env_ids, :, :] = 0.
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
         
