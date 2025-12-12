@@ -19,6 +19,7 @@ import torch
 TEACHER_CHECKPOINTS = {
      14: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/14model_43000.pt",
      #8: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/8model_9000.pt",
+     #3: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/model_7000.pt",
 }
 
 def build_distillation_cfg(env_cfg) -> Dict:
