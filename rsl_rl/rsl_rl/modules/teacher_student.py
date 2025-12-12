@@ -130,7 +130,7 @@ class MultiStudentTeacher(nn.Module):
         if student_obs_normalization:
             self.student_obs_normalizer = EmpiricalNormalization(num_student_obs)
         else:
-            self.student_obs_normalizer = nn.Identity()
+            self.student_obs_normalizer = torch.nn.Identity()
 
         # Teacher Actor
         if None in (teacher_num_prop, teacher_num_scan):
@@ -165,7 +165,7 @@ class MultiStudentTeacher(nn.Module):
         if teacher_obs_normalization:
             self.teacher_obs_normalizer = EmpiricalNormalization(num_teacher_obs)
         else:
-            self.teacher_obs_normalizer = nn.Identity()
+            self.teacher_obs_normalizer = torch.nn.Identity()
 
         # Action noise
         self.noise_std_type = noise_std_type
@@ -213,7 +213,7 @@ class MultiStudentTeacher(nn.Module):
         注意：这里使用的是self.student网络，因为这是学生模型的动作分布
         """
         # 计算动作均值（使用eval模式，与推理时一致）
-        mean = self.student(obs, hist_encoding=self.student_hist_encoding, eval=True)
+        mean = self.student(obs, hist_encoding=self.student_hist_encoding)
         # Compute standard deviation
         if self.noise_std_type == "scalar":
             std = self.std.expand_as(mean)
@@ -241,7 +241,7 @@ class MultiStudentTeacher(nn.Module):
         obs = self.get_student_obs(obs)
         obs = self.student_obs_normalizer(obs)
         # 确保使用eval模式进行推理（与训练时的_update_distribution一致）
-        return self.student(obs, hist_encoding=self.student_hist_encoding, eval=True)
+        return self.student(obs, hist_encoding=self.student_hist_encoding)
 
     def evaluate(self, obs: TensorDict, terrain_ids: Union[torch.Tensor, None] = None) -> torch.Tensor:
         obs = self.get_teacher_obs(obs)
@@ -255,13 +255,22 @@ class MultiStudentTeacher(nn.Module):
         if terrain_ids is None:
             # Default to first teacher if no terrain_ids provided (e.g. during simple eval)
             with torch.no_grad():
-                return self.teachers[0](obs, hist_encoding=self.teacher_hist_encoding)
+                return self.teachers[0](obs, hist_encoding=self.teacher_hist_encoding, eval=True)
 
+        #print("INFO: MultiStudentTeacher.evaluate received terrain_ids'shape :", terrain_ids.shape)
+        #terrain_ids = terrain_ids.long()
+        #print("INFO: MultiStudentTeacher.evaluate terrain_ids'shape after process:", terrain_ids.shape)
+        #terrain_ids = terrain_ids.long().flatten()
+        
         actions = torch.zeros(obs.shape[0], self.teachers[0].num_actions, device=obs.device)
         
         # Determine which terrain ID maps to which teacher index
         # If teacher_terrain_ids is provided, use it. Otherwise assume 0, 1, 2...
         target_ids = self.teacher_terrain_ids if self.teacher_terrain_ids is not None else list(range(self.num_teachers))
+        #print("INFO: MultiStudentTeacher.evaluate called with terrain_ids:", terrain_ids)
+        #print("INFO: Target terrain IDs for teachers:", target_ids)
+        # 用于检查是否有环境未被分配教师
+        covered_mask = torch.zeros(obs.shape[0], dtype=torch.bool, device=obs.device)
         
         for i, teacher in enumerate(self.teachers):
             # Get the terrain ID that this teacher (at index i) is responsible for
@@ -270,8 +279,17 @@ class MultiStudentTeacher(nn.Module):
                 # Select envs that match this teacher's terrain ID
                 mask = (terrain_ids == t_id)
                 if mask.any():
+                    covered_mask |= mask
                     with torch.no_grad():
-                        actions[mask] = teacher(obs[mask], hist_encoding=self.teacher_hist_encoding)
+                        actions[mask] = teacher(obs[mask], hist_encoding=self.teacher_hist_encoding, eval=True)
+                        
+        if not covered_mask.all():
+            uncovered_ids = terrain_ids[~covered_mask].unique()
+            print(f"WARNING: Some environments have terrain IDs that are not assigned to any teacher.")
+            print(f"\n[DEBUG] Mismatch detected in evaluate!")
+            print(f"  - Supported Teacher IDs (target_ids): {target_ids}")
+            print(f"  - Unassigned Terrain IDs found in batch: {uncovered_ids.cpu().numpy()}")
+            print(f"  - Count of unassigned envs: {(~covered_mask).sum().item()} / {obs.shape[0]}")
         return actions
 
     def get_student_obs(self, obs: TensorDict) -> torch.Tensor:

@@ -5,4 +5,5 @@ cd legged_gym/legged_gym/scripts
 python train_distill_beamdojo.py \
                                  --device cuda:0 \
                                  --headless \
+                                 --run_name 1teacher
                                  

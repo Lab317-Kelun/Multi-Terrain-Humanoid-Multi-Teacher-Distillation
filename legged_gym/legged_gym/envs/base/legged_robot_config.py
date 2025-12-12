@@ -56,7 +56,7 @@ class LeggedRobotCfg(BaseConfig):
 
         history_encoding = True
         reorder_dofs = True
-        use_double_critic = True
+        #use_double_critic = True
         
         
         # action_delay_range = [0, 5]

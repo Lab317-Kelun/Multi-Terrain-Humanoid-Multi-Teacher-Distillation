@@ -222,7 +222,8 @@ class HumanoidRobot(BaseTask):
                     self.last_times = self.total_times
                     
 
-        if self.cfg.env.use_double_critic:
+        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
+        if use_double_critic and hasattr(self, 'dense_rew_buf') and hasattr(self, 'sparse_rew_buf'):
             rewards = {
                 'dense': self.dense_rew_buf,
                 'sparse': self.sparse_rew_buf
@@ -519,7 +520,9 @@ class HumanoidRobot(BaseTask):
         """
         self.rew_buf[:] = 0.
         
-        if self.cfg.env.use_double_critic:
+        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
+        
+        if use_double_critic:
             # 初始化密集和稀疏奖励缓冲区
             if not hasattr(self, 'dense_rew_buf'):
                 self.dense_rew_buf = torch.zeros_like(self.rew_buf)

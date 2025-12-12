@@ -70,7 +70,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         # 启用接触信息
         include_foot_contacts = True
-        use_double_critic = False
+        #use_double_critic = False
         
         next_goal_threshold = 0.4
         reach_goal_delay = 0.05

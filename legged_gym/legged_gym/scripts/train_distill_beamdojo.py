@@ -17,8 +17,8 @@ import torch
 # Map terrain_id (int) to checkpoint path (str)
 # Please update these paths with actual checkpoints corresponding to each terrain type
 TEACHER_CHECKPOINTS = {
-     14: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Nov22_18-58-32--stage2_no_onehot_stone/model_43000.pt",
-     8: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Nov21_16-11-53--stage2_no_onehot_gap/model_9000.pt",
+     14: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/14model_43000.pt",
+     #8: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/8model_9000.pt",
 }
 
 def build_distillation_cfg(env_cfg) -> Dict:
@@ -66,7 +66,7 @@ def build_distillation_cfg(env_cfg) -> Dict:
         "student_num_hist": num_hist,
         "student_actor_hidden_dims": list(policy_defaults.actor_hidden_dims),
         "student_hist_encoding": True,
-        "student_obs_normalization": False,
+        "student_obs_normalization": True,
         # Teacher layout (full information)
         "teacher_num_prop": num_prop,
         "teacher_num_scan": num_scan,
@@ -75,7 +75,7 @@ def build_distillation_cfg(env_cfg) -> Dict:
         "teacher_num_hist": num_hist,
         "teacher_actor_hidden_dims": list(policy_defaults.actor_hidden_dims),
         "teacher_hist_encoding": True,
-        "teacher_obs_normalization": False,
+        "teacher_obs_normalization": True,
         # Noise configuration
         "init_noise_std": 0.1,
         "noise_std_type": "scalar",
@@ -133,11 +133,44 @@ def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str
             # PPO checkpoints wrap the actor parameters inside 'model_state_dict'
             teacher_state = state.get("model_state_dict", state)
             
+            # Fix: Prepare state dict for Actor module by removing 'actor.' prefix
+            actor_state_dict = {}
+            for k, v in teacher_state.items():
+                if k.startswith("actor."):
+                    actor_state_dict[k.replace("actor.", "")] = v
+                elif not k.startswith("critic.") and not k.startswith("std"):
+                    # Fallback for keys that might already be correct or belong to other parts
+                    actor_state_dict[k] = v
+
             if i < len(runner.alg.policy.teachers):
-                runner.alg.policy.teachers[i].load_state_dict(teacher_state, strict=False)
+                # Load and verify
+                missing, unexpected = runner.alg.policy.teachers[i].load_state_dict(actor_state_dict, strict=False)
+                
+                # Check if critical weights are missing
+                critical_missing = [k for k in missing if "actor_backbone" in k or "encoder" in k]
+                if critical_missing:
+                    print(f"⚠️  WARNING: Teacher {i} (Terrain {t_id}) seems to have failed loading critical weights!")
+                    print(f"    Missing keys example: {critical_missing[:3]}")
+                else:
+                    print(f"✅ Teacher {i} (Terrain {t_id}) loaded successfully.")
                 
             else:
                 print(f"Error: Teacher index {i} out of range (num_teachers={len(runner.alg.policy.teachers)}).")
+        
+        # Attempt to load observation normalizer from the first teacher checkpoint (best effort)
+        if len(sorted_ids) > 0:
+            first_ckpt = TEACHER_CHECKPOINTS[sorted_ids[0]]
+            state = torch.load(first_ckpt, map_location=device)
+            teacher_state = state.get("model_state_dict", state)
+            norm_state_dict = {}
+            for k, v in teacher_state.items():
+                if "actor_obs_normalizer." in k:
+                    norm_state_dict[k.replace("actor_obs_normalizer.", "")] = v
+            
+            if norm_state_dict and hasattr(runner.alg.policy, "teacher_obs_normalizer"):
+                print(f"Loading teacher observation normalizer from first checkpoint: {first_ckpt}")
+                runner.alg.policy.teacher_obs_normalizer.load_state_dict(norm_state_dict, strict=False)
+
         runner.alg.policy.loaded_teacher = True
     else:
         if not checkpoint:
@@ -146,8 +179,29 @@ def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str
         state = torch.load(checkpoint, map_location=device)
         # PPO checkpoints wrap the actor parameters inside 'model_state_dict'
         teacher_state = state.get("model_state_dict", state)
-        for teacher in runner.alg.policy.teachers:
-            teacher.load_state_dict(teacher_state, strict=False)
+        
+        # Fix: Prepare state dict
+        actor_state_dict = {}
+        norm_state_dict = {}
+        for k, v in teacher_state.items():
+            if k.startswith("actor."):
+                actor_state_dict[k.replace("actor.", "")] = v
+            elif "actor_obs_normalizer." in k:
+                norm_state_dict[k.replace("actor_obs_normalizer.", "")] = v
+            elif not k.startswith("critic.") and not k.startswith("std"):
+                actor_state_dict[k] = v
+
+        for idx, teacher in enumerate(runner.alg.policy.teachers):
+            missing, unexpected = teacher.load_state_dict(actor_state_dict, strict=False)
+            critical_missing = [k for k in missing if "actor_backbone" in k]
+            if critical_missing:
+                 print(f"⚠️  WARNING: Teacher {idx} failed to load weights properly.")
+            else:
+                 print(f"✅ Teacher {idx} loaded successfully.")
+        
+        if norm_state_dict and hasattr(runner.alg.policy, "teacher_obs_normalizer"):
+            print("Loading teacher observation normalizer.")
+            runner.alg.policy.teacher_obs_normalizer.load_state_dict(norm_state_dict, strict=False)
 
 
 def maybe_resume_student(runner: DistillationRunner, checkpoint: str | None, device: str) -> None:
