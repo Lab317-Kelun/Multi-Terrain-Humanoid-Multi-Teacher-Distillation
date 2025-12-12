@@ -81,7 +81,7 @@ def get_scan_from_terrain(m, d, scan_points_body):
     
     return terrain_heights
 
-def compute_proprioceptive_obs(d, config, action, cmd, cur_goal):
+def compute_proprioceptive_obs(d, config, action, cmd, cur_goal, goal_start_pos, goal_started_moving, original_lin_vel_cmd, goal_reached=False):
     num_actions = config['num_actions']
     qj = d.qpos[7:7+num_actions]
     dqj = d.qvel[6:6+num_actions]
@@ -89,16 +89,79 @@ def compute_proprioceptive_obs(d, config, action, cmd, cur_goal):
     quat = d.qpos[3:7]
     base_pos = d.qpos[:3]
     
-    w, x, y, z = quat
-    yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-    target_vec = cur_goal[:2] - base_pos[:2]
-    target_yaw = np.arctan2(target_vec[1], target_vec[0])
-    delta_yaw = np.arctan2(np.sin(target_yaw - yaw), np.cos(target_yaw - yaw))
+    # 如果已到达目标，所有速度命令和误差都设为0
+    if goal_reached:
+        cmd[:] = 0.0
+        delta_yaw = 0.0
+        delta_pose_x = 0.0
+        delta_pose_y = 0.0
+    else:
+        # 计算朝向和位置信息
+        w, x, y, z = quat
+        yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+        target_vec = cur_goal[:2] - base_pos[:2]
+        target_yaw = np.arctan2(target_vec[1], target_vec[0])
+        delta_yaw = np.arctan2(np.sin(target_yaw - yaw), np.cos(target_yaw - yaw))
+        # 计算角速度命令
+        ang_vel_cmd = 0.8 * delta_yaw
+        ang_vel_cmd = np.clip(ang_vel_cmd, -0.5, 0.5)
+        cmd[2] = ang_vel_cmd
     
-    cmd[2] = np.clip(0.8 * delta_yaw, -0.5, 0.5)
+        # 计算 y 方向速度命令（基于偏离起点到目标直线的侧向偏差）
+        # 只在第一次对齐后（goal_started_moving为True）才计算和应用
+        y_vel_cmd = 0.0
+        yaw_tolerance = config.get('yaw_tolerance_for_linear_vel', 0.15)
+        heading_aligned = np.abs(delta_yaw) < yaw_tolerance
+        
+        if goal_started_moving:
+            # 1. 计算从起点到目标的直线方向向量
+            start_to_goal = cur_goal[:2] - goal_start_pos  # [2]
+            line_length = np.linalg.norm(start_to_goal)
+            line_length = np.clip(line_length, a_min=1e-5, a_max=None)
+            line_dir_normalized = start_to_goal / line_length  # [2] 归一化的直线方向
+            
+            # 2. 计算从起点到机器人当前位置的向量
+            start_to_robot = base_pos[:2] - goal_start_pos  # [2]
+            
+            # 3. 计算机器人位置在直线方向上的投影长度
+            proj_length = np.sum(start_to_robot * line_dir_normalized)  # 标量
+            
+            # 4. 计算机器人位置相对于直线的侧向偏移（垂直距离）
+            # 投影点位置
+            proj_point = goal_start_pos + proj_length * line_dir_normalized  # [2]
+            # 从投影点到机器人的向量（这就是侧向偏移向量）
+            lateral_offset_vec = base_pos[:2] - proj_point  # [2]
+            
+            # 5. 计算侧向偏移的方向（垂直于直线的方向）
+            # 直线的垂直方向：逆时针旋转90度 (x, y) -> (-y, x)
+            perpendicular_dir = np.array([-line_dir_normalized[1], line_dir_normalized[0]])  # [2]
+            
+            # 6. 计算有向侧向偏移（带符号，正负表示在直线的哪一侧）
+            lateral_offset_moving = np.sum(lateral_offset_vec * perpendicular_dir)  # 标量
+            
+            # 7. 根据侧向偏移计算 y 方向速度命令
+            y_vel_gain = config.get('y_vel_gain', 0.8)
+            y_vel_max = config.get('y_vel_max', 0.5)
+            y_vel_cmd = y_vel_gain * lateral_offset_moving
+            y_vel_cmd = np.clip(y_vel_cmd, -y_vel_max, y_vel_max)
+        
+        # 设置线速度命令
+        # 一旦首次对齐（goal_started_moving为True），x和y方向速度都启用
+        # x 方向速度：只在首次对齐后应用原始采样的速度
+        if goal_started_moving:
+            cmd[0] = original_lin_vel_cmd[0]
+        else:
+            cmd[0] = 0.0
+        # y 方向速度：只在首次对齐后（goal_started_moving为True），根据偏离直线计算
+        if goal_started_moving:
+            cmd[1] = y_vel_cmd
+        else:
+            cmd[1] = 0.0
+        
+        # 计算位置误差（只在未到达目标时计算）
+        delta_pose_x = cur_goal[0] - base_pos[0]
+        delta_pose_y = cur_goal[1] - base_pos[1]
     
-    delta_pose_x = cur_goal[0] - base_pos[0]
-    delta_pose_y = cur_goal[1] - base_pos[1]
     default_angles = config['default_angles']
     
     proprio_obs = np.zeros(48, dtype=np.float32)
@@ -125,8 +188,8 @@ def compute_proprioceptive_obs(d, config, action, cmd, cur_goal):
     
     return proprio_obs
 
-def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, cur_goal):
-    proprio_obs = compute_proprioceptive_obs(d, config, action, cmd, cur_goal)
+def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, cur_goal, goal_start_pos, goal_started_moving, original_lin_vel_cmd, goal_reached=False):
+    proprio_obs = compute_proprioceptive_obs(d, config, action, cmd, cur_goal, goal_start_pos, goal_started_moving, original_lin_vel_cmd, goal_reached)
     
     num_scan = scan_points_body.shape[0]
     if config.get('measure_heights', True) and config.get('use_lidar', True) and config.get('lidar_mode') == 'terrain':
@@ -185,6 +248,7 @@ def main():
     action = np.zeros(num_actions, dtype=np.float32)
     target_dof_pos = config['default_angles'].copy()
     cmd = config['cmd_init'].copy()
+    original_lin_vel_cmd = config['cmd_init'][:2].copy()  # 保存原始采样的线速度命令（用于"先转向再移动"逻辑）
     obs_history_buf = np.zeros((config['obs_history_len'], 48), dtype=np.float32)
     
     cur_goal = config['goal_init'].copy().astype(np.float32)
@@ -192,6 +256,9 @@ def main():
     goal_dynamic_update = config['goal_dynamic_update']
     goal_distance_range = config['goal_forward_distance_range']
     goal_start_pos = d.qpos[:2].copy().astype(np.float32)
+    goal_started_moving = False  # 标记该目标是否已经开始移动（第一次对齐后）
+    need_recalc_timeout = True  # 是否需要重新计算期望时间
+    goal_reached_once = False  # 标记是否已经到达过目标（一旦到达就永远保持停止）
     
     # 加载 ONNX 模型
     print(f"加载 ONNX 策略: {os.path.basename(config['policy_path'])}")
@@ -230,32 +297,79 @@ def main():
                 robot_pos = d.qpos[:2]
                 distance_to_goal = np.linalg.norm(cur_goal[:2] - robot_pos)
                 
-                if goal_dynamic_update and distance_to_goal < goal_reach_threshold:
-                    w, x, y, z = d.qpos[3:7]
-                    yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
-                    forward_dist = np.random.uniform(goal_distance_range[0], goal_distance_range[1])
-                    angle_range = config.get('goal_angle_range', [-np.pi/2, np.pi/2])
-                    angle_offset = np.random.uniform(angle_range[0], angle_range[1])
-                    target_yaw = yaw + angle_offset
-                    
-                    cur_goal[0] = robot_pos[0] + forward_dist * np.cos(target_yaw)
-                    cur_goal[1] = robot_pos[1] + forward_dist * np.sin(target_yaw)
-                    cur_goal[2] = config['goal_init'][2]
-                    goal_start_pos = robot_pos[:2].copy()
-                    
-                    print(f"[目标更新] ({cur_goal[0]:.2f}, {cur_goal[1]:.2f}) | 距离:{forward_dist:.2f}m, 角度:{np.degrees(angle_offset):+.0f}°")
+                # 计算朝向误差，用于判断是否对齐
+                quat = d.qpos[3:7]
+                w, x, y, z = quat
+                yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+                target_vec = cur_goal[:2] - robot_pos
+                target_yaw = np.arctan2(target_vec[1], target_vec[0])
+                delta_yaw = np.arctan2(np.sin(target_yaw - yaw), np.cos(target_yaw - yaw))
+                yaw_tolerance = config.get('yaw_tolerance_for_linear_vel', 0.15)
+                heading_aligned = np.abs(delta_yaw) < yaw_tolerance
                 
-                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, cur_goal)
+                # 检测首次对齐：需要重新计算 且 当前对齐
+                if need_recalc_timeout and heading_aligned:
+                    # 首次对齐时，记录当前pose作为起点，然后标记已开始移动
+                    goal_start_pos = robot_pos.copy()
+                    goal_started_moving = True
+                    need_recalc_timeout = False  
+                
+                # 检查是否到达目标
+                goal_reached = goal_reached_once  # 如果之前到达过，就一直保持停止状态
+                if distance_to_goal < goal_reach_threshold:
+                    if goal_dynamic_update:
+                        # 动态更新目标
+                        forward_dist = np.random.uniform(goal_distance_range[0], goal_distance_range[1])
+                        angle_range = config.get('goal_angle_range', [-np.pi/2, np.pi/2])
+                        angle_offset = np.random.uniform(angle_range[0], angle_range[1])
+                        target_yaw = yaw + angle_offset
+                        
+                        cur_goal[0] = robot_pos[0] + forward_dist * np.cos(target_yaw)
+                        cur_goal[1] = robot_pos[1] + forward_dist * np.sin(target_yaw)
+                        cur_goal[2] = config['goal_init'][2]
+                        # 注意：goal_start_pos 现在在首次对齐时设置，不在这里设置
+                        goal_started_moving = False  # 重置状态
+                        need_recalc_timeout = True  # 需要重新计算
+                        goal_reached_once = False  # 重置到达标志（因为目标更新了）
+                        
+                        print(f"[目标更新] ({cur_goal[0]:.2f}, {cur_goal[1]:.2f}) | 距离:{forward_dist:.2f}m, 角度:{np.degrees(angle_offset):+.0f}°")
+                    else:
+                        # 到达目标后停止（一旦到达就永远保持停止）
+                        if not goal_reached_once:
+                            print(f"[到达目标] 位置:({robot_pos[0]:5.2f},{robot_pos[1]:5.2f}) | 已停止")
+                        goal_reached_once = True
+                        goal_reached = True
+                        goal_started_moving = False
+                
+                full_obs, proprio_obs = compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_history_buf, cur_goal, goal_start_pos, goal_started_moving, original_lin_vel_cmd, goal_reached)
                 obs_history_buf = np.roll(obs_history_buf, -1, axis=0)
                 obs_history_buf[-1] = proprio_obs
+                
+                # 从观测中提取关键值（需要除以缩放因子还原）
+                # 观测结构：commands(3) + ang_vel(3) + delta_yaw(1) + delta_pose_x(1) + delta_pose_y(1) + ...
+                obs_cmd = proprio_obs[0:3] / config['cmd_scale']  # 速度命令（还原）
+                obs_ang_vel = proprio_obs[3:6] / config['ang_vel_scale']  # 角速度（还原）
+                obs_delta_yaw = proprio_obs[6] / config['delta_yaw_scale']  # 朝向误差（还原）
+                obs_delta_pose_x = proprio_obs[7] / config['delta_pose_scale']  # 位置误差x（还原）
+                obs_delta_pose_y = proprio_obs[8] / config['delta_pose_scale']  # 位置误差y（还原）
                 
                 # 使用 ONNX Runtime 进行推理
                 # 输入需要是 (1, obs_dim) 的形状
                 obs_input = full_obs.reshape(1, -1).astype(np.float32)
                 action = session.run([output_name], {input_name: obs_input})[0].squeeze()
                 
+                # 动作裁剪：与训练环境一致（humanoid_robot.py 第163-164行）
+                # clip_actions = cfg.normalization.clip_actions / cfg.control.action_scale
+                clip_actions = config.get('clip_actions', 1.2) / config['action_scale']
+                action[:num_actions] = np.clip(action[:num_actions], -clip_actions, clip_actions)
+                
                 target_dof_pos = action[:num_actions] * config['action_scale'] + config['default_angles']
                 control_counter += 1
+                
+                # 打印观测值
+                print(f"[{control_counter:5d}] 观测 - 线速度: vx={obs_cmd[0]:6.3f} vy={obs_cmd[1]:6.3f} | 角速度: {obs_cmd[2]:6.3f} | "
+                      f"delta_yaw={obs_delta_yaw:6.3f} | delta_pose: x={obs_delta_pose_x:6.3f} y={obs_delta_pose_y:6.3f} | "
+                      f"状态: {'✓移动' if goal_started_moving else '✗转向'} {'[已到达]' if goal_reached else ''}")
                 
                 if control_counter % print_period == 0:
                     print(f"[{control_counter:5d}] 位置:({robot_pos[0]:5.2f},{robot_pos[1]:5.2f}) 目标:({cur_goal[0]:5.2f},{cur_goal[1]:5.2f}) 距离:{distance_to_goal:.2f}m")

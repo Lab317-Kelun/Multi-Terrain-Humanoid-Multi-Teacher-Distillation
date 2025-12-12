@@ -61,7 +61,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 48  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action_history)=48
+        n_proprio = 45  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action_history)=48
         history_len = 10
         
         # 重新计算总观测维度
@@ -78,6 +78,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         next_goal_threshold = 0.4
         reach_goal_delay = 0.1
         num_future_goal_obs = 2
+        goal_stop_duration = 1.0  # 到达目标后停止的持续时间（秒），停止期间观测的速度、角速度、误差都为0
         
     # 课程学习配置
     class curriculum_config:

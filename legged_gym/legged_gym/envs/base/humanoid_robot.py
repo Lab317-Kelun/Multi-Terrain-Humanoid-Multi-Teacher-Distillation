@@ -345,14 +345,24 @@ class HumanoidRobot(BaseTask):
         use_forward_goals = getattr(self.cfg.env, 'use_forward_goals', False)
         
         if use_forward_goals:
-            # 使用前方目标模式：检查是否到达目标，到达后生成新目标
+            # 使用前方目标模式：检查是否到达目标，到达后停止1秒再生成新目标
             self.reached_goal_ids = torch.norm(self.root_states[:, :2] - self.cur_goals[:, :2], dim=1) < self.cfg.env.next_goal_threshold
-            self.reach_goal_timer[self.reached_goal_ids] += 1
             
-            # 如果到达目标且满足延迟条件，生成新目标
-            next_flag = self.reach_goal_timer > self.cfg.env.reach_goal_delay / self.dt
-            if next_flag.any():
-                env_ids_to_update = next_flag.nonzero(as_tuple=False).flatten()
+            # 如果到达目标且不在停止状态，开始停止计时
+            just_reached = self.reached_goal_ids & (~self.goal_stopped)
+            if just_reached.any():
+                self.goal_stopped[just_reached] = True
+                self.goal_stop_timer[just_reached] = 0.0
+                self.goal_started_moving[just_reached] = False
+            
+            # 如果正在停止状态，继续计时
+            if self.goal_stopped.any():
+                self.goal_stop_timer[self.goal_stopped] += self.dt
+            
+            # 如果停止时间达到要求，生成新目标
+            stop_complete = self.goal_stopped & (self.goal_stop_timer >= self.goal_stop_duration)
+            if stop_complete.any():
+                env_ids_to_update = stop_complete.nonzero(as_tuple=False).flatten()
                 # 增加目标计数（用于判断是否完成）
                 self.cur_goal_idx[env_ids_to_update] += 1
                 
@@ -366,8 +376,10 @@ class HumanoidRobot(BaseTask):
                 
                 # 注意：goal_start_pos 现在在首次对齐时设置，不在这里设置
                 
-                # 重置计时器
+                # 重置计时器和停止状态
                 self.reach_goal_timer[env_ids_to_update] = 0
+                self.goal_stop_timer[env_ids_to_update] = 0.0
+                self.goal_stopped[env_ids_to_update] = False
                 
                 # 标记这些环境需要重新计算期望时间(在首次对齐时)
                 if not hasattr(self, 'need_recalc_timeout'):
@@ -519,7 +531,11 @@ class HumanoidRobot(BaseTask):
         goal_threshold = self.cfg.env.next_goal_threshold
         goal_not_reached = self.distance_to_goal >= goal_threshold
         timeout_exceeded = self.goal_timeout_timer >= self.goal_timeout_duration
-        goal_timeout = timeout_exceeded & goal_not_reached
+        # 超时检查：排除正在停止状态的环境（已经到达目标，正在停止1秒）
+        if hasattr(self, 'goal_stopped'):
+            goal_timeout = timeout_exceeded & goal_not_reached & (~self.goal_stopped)
+        else:
+            goal_timeout = timeout_exceeded & goal_not_reached
         
         # 检测计时器没变化(从对齐变为未对齐),触发重置
         # if self.cfg.env.use_forward_goals:
@@ -626,6 +642,9 @@ class HumanoidRobot(BaseTask):
         self.action_history_buf[env_ids, :, :] = 0.
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
+        if hasattr(self, 'goal_stop_timer'):
+            self.goal_stop_timer[env_ids] = 0.0
+            self.goal_stopped[env_ids] = False
         
         if self.cfg.env.use_forward_goals:
             # 更新基础状态（需要先更新才能计算yaw）
@@ -810,10 +829,19 @@ class HumanoidRobot(BaseTask):
         noisy_dof_vel = noisy_dof_vel * self.obs_scales.dof_vel
         noisy_ang_vel = noisy_ang_vel * self.obs_scales.ang_vel
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
+        
+        # 如果正在停止状态，将速度命令和角速度观测设为0
+        if hasattr(self, 'goal_stopped'):
+            noisy_commands[self.goal_stopped, :] = 0.0  # 速度命令设为0
+            noisy_delta_yaw[self.goal_stopped] = 0.0
+            noisy_delta_pose_x[self.goal_stopped] = 0.0
+            noisy_delta_pose_y[self.goal_stopped] = 0.0
 
         # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
-        
+        # print('noisy_commands', noisy_commands)
+        # print('noisy_delta_yaw', noisy_delta_yaw)
+        # print('noisy_delta_pose_x', noisy_delta_pose_x)
+        # print('noisy_delta_pose_y', noisy_delta_pose_y)
         # 获取步态相位观测
         # phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
         
@@ -833,9 +861,9 @@ class HumanoidRobot(BaseTask):
                             # self.action_history_buf[:, -1], # 12
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
-                            noisy_delta_yaw[:, None],           # R^1 (带噪声的朝向误差)
-                            noisy_delta_pose_x[:, None],        # R^1 (带噪声的X方向位置误差)
-                            noisy_delta_pose_y[:, None],        # R^1 (带噪声的Y方向位置误差)
+                            # noisy_delta_yaw[:, None],           # R^1 (带噪声的朝向误差)
+                            # noisy_delta_pose_x[:, None],        # R^1 (带噪声的X方向位置误差)
+                            # noisy_delta_pose_y[:, None],        # R^1 (带噪声的Y方向位置误差)
                             noisy_gravity,           # R^3 (带噪声的重力)
                             noisy_dof_pos,           # R^{n_dof} (带噪声的关节位置)
                             noisy_dof_vel,           # R^{n_dof} (带噪声的关节速度)
@@ -1005,22 +1033,35 @@ class HumanoidRobot(BaseTask):
             self.original_lin_vel_cmd[resample_env_ids] = self.commands[resample_env_ids, :2].clone()
 
         if self.cfg.env.use_forward_goals:
-            self.commands[:, 3] = self.target_yaw
-            heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+            # 如果正在停止状态，将所有命令设为0
+            if self.goal_stopped.any():
+                self.commands[self.goal_stopped, 0] = 0.0  # vx
+                self.commands[self.goal_stopped, 1] = 0.0  # vy
+                self.commands[self.goal_stopped, 2] = 0.0  # vyaw
             
-            # 获取配置参数
-            yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.15)
-            
-            # 计算角速度命令,限制在±0.5范围内
-            ang_vel_cmd = 0.8 * heading_error
-            ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
-            small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
-            self.commands[:, 2] = torch.where(small_command_mask, 
-                                            torch.zeros_like(ang_vel_cmd), 
-                                            ang_vel_cmd)
-            
-            # 判断朝向是否对齐
-            heading_aligned = torch.abs(heading_error) < yaw_tolerance
+            # 只对非停止状态的环境计算命令
+            active_mask = ~self.goal_stopped
+            if active_mask.any():
+                self.commands[active_mask, 3] = self.target_yaw[active_mask]
+                heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+                
+                # 获取配置参数
+                yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.15)
+                
+                # 计算角速度命令,限制在±0.5范围内
+                ang_vel_cmd = 0.8 * heading_error
+                ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
+                small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
+                self.commands[:, 2] = torch.where(small_command_mask | self.goal_stopped, 
+                                                torch.zeros_like(ang_vel_cmd), 
+                                                ang_vel_cmd)
+                
+                # 判断朝向是否对齐
+                heading_aligned = torch.abs(heading_error) < yaw_tolerance
+            else:
+                heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
+                yaw_tolerance = getattr(self.cfg.commands, 'yaw_tolerance_for_linear_vel', 0.15)
+                heading_aligned = torch.abs(heading_error) < yaw_tolerance
             
             # 检测首次对齐:需要重新计算 且 当前对齐
             first_aligned = self.need_recalc_timeout & heading_aligned
@@ -1084,20 +1125,27 @@ class HumanoidRobot(BaseTask):
                 y_vel_cmd = torch.where(moving_env_mask, y_vel_cmd_moving, torch.zeros_like(y_vel_cmd))
                 lateral_offset = torch.where(moving_env_mask, lateral_offset_moving, torch.zeros_like(lateral_offset))
             
-            # 设置线速度命令
-            self.commands[:, 0] = torch.where(heading_aligned, 
-                                            self.original_lin_vel_cmd[:, 0],
-                                            torch.zeros_like(self.commands[:, 0]))
+            # 设置线速度命令（停止状态时保持为0）
+            self.commands[:, 0] = torch.where(self.goal_stopped | (~heading_aligned), 
+                                            torch.zeros_like(self.commands[:, 0]),
+                                            self.original_lin_vel_cmd[:, 0])
             # y 方向速度：只在第一次对齐后（goal_started_moving为True），根据偏离起点到目标直线的侧向偏差计算
-            # 和 x 方向速度一样，只在 goal_started_moving 为 True 时应用
-            self.commands[:, 1] = torch.where(self.goal_started_moving, 
-                                            y_vel_cmd,  # 使用根据偏离直线计算的 y 方向速度
-                                            torch.zeros_like(self.commands[:, 1]))
+            # 和 x 方向速度一样，只在 goal_started_moving 为 True 时应用，停止状态时保持为0
+            self.commands[:, 1] = torch.where(self.goal_stopped | (~self.goal_started_moving), 
+                                            torch.zeros_like(self.commands[:, 1]),
+                                            y_vel_cmd)  # 使用根据偏离直线计算的 y 方向速度
             
             # 从第一次对齐后就持续累积计时器(无论之后是否偏离)
-            self.goal_timeout_timer += torch.where(self.goal_started_moving, 
-                                                   torch.full_like(self.goal_timeout_timer, self.dt),
-                                                   torch.zeros_like(self.goal_timeout_timer))
+            # 但如果已经到达目标并开始停止，停止计时器的累积（避免超时重置）
+            if hasattr(self, 'goal_stopped'):
+                moving_and_not_stopped = self.goal_started_moving & (~self.goal_stopped)
+                self.goal_timeout_timer += torch.where(moving_and_not_stopped, 
+                                                       torch.full_like(self.goal_timeout_timer, self.dt),
+                                                       torch.zeros_like(self.goal_timeout_timer))
+            else:
+                self.goal_timeout_timer += torch.where(self.goal_started_moving, 
+                                                       torch.full_like(self.goal_timeout_timer, self.dt),
+                                                       torch.zeros_like(self.goal_timeout_timer))
             
             # 实时打印第一个环境的速度和角速度
             env_id = 0
@@ -1512,6 +1560,12 @@ class HumanoidRobot(BaseTask):
         self.last_goal_timeout_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 上一步的计时器值
         self.need_recalc_timeout = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 是否需要重新计算期望时间
         self.goal_started_moving = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 标记该目标是否已经开始移动（第一次对齐后）
+        
+        # 目标停止相关缓冲区（到达目标后停止1秒）
+        goal_stop_duration = getattr(self.cfg.env, 'goal_stop_duration', 1.0)
+        self.goal_stop_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 到达目标后的停止计时器
+        self.goal_stop_duration = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * goal_stop_duration  # 停止持续时间（秒）
+        self.goal_stopped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 标记是否正在停止状态
         
         # 动态计算高度采样点数
         num_height_points = len(self.cfg.terrain.measured_points_x) * len(self.cfg.terrain.measured_points_y)
@@ -2675,8 +2729,7 @@ class HumanoidRobot(BaseTask):
     def _reward_stand_still(self):
         # Penalize motion at zero commands
         contacts = torch.sum(self.contact_forces[:, self.feet_indices, 2] < 0.1, dim=-1)
-        error_sim = contacts
-        return error_sim * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+        return contacts * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
     
     def _reward_termination(self):
         # Terminal reward / penalty

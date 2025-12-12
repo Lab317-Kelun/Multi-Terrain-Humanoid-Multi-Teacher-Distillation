@@ -1,6 +1,4 @@
-# 策略模型路径：ONNX格式的模型文件（.onnx格式）
-policy_path: "# 策略模型路径：ONNX格式的模型文件（.onnx格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec10_21-03-28--homie_stage0_target_navigation_novely/traced/Dec10_21-03-28--homie_stage0_target_navigation_novely-200-mujoco.onnx"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec11_15-00-24--homie_stage1_target_navigation_novely/traced/Dec11_15-00-24--homie_stage1_target_navigation_novely-16000-mujoco.onnx"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 
@@ -44,6 +42,7 @@ ang_vel_scale: 0.5       # 角速度缩放
 dof_pos_scale: 1.0       # 关节位置缩放
 dof_vel_scale: 0.05      # 关节速度缩放
 action_scale: 0.25       # 动作缩放
+clip_actions: 1.2        # 动作裁剪阈值（训练时使用：clip_actions / action_scale = 1.2 / 0.25 = 4.8）
 cmd_scale: [2.0, 2.0, 0.5]  # 速度指令缩放 [vx, vy, vyaw]
 delta_yaw_scale: 0.5     # 朝向误差缩放
 delta_pose_scale: 0.5    # 位置误差缩放 (x, y)
@@ -61,7 +60,7 @@ goal_init: [1.0, 1.0, 0.78]
 # 到达目标的距离阈值（米），小于此距离认为到达目标
 goal_reach_threshold: 0.2
 # 是否启用动态目标更新（到达目标后自动生成新目标）
-goal_dynamic_update: true
+goal_dynamic_update: false  # 设置为false，到达目标后停止不动
 # 动态更新时，新目标在机器人前方的距离范围 [min, max] (米)
 goal_forward_distance_range: [1.0, 2.0]
 # 动态更新时，新目标相对于当前朝向的角度范围 [min, max] (弧度)
