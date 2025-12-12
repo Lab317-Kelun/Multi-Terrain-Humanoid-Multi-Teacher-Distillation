@@ -241,7 +241,7 @@ class HumanoidRobot(BaseTask):
         return self.obs_history_buf
     
     def get_amp_observations(self):
-        """返回判别器观测（AMP），包含姿态与动力学：
+        """返回判别器观测（AMP），包含姿态与动力学：fget_amp_observations
         Joint_Pos(12)、Joint_Vel(12)、Base_LinVel(3)、Base_AngVel(3) 共30维，均为机体坐标系。
         """
         if getattr(self, 'num_amp_obs', 0) == 0:
