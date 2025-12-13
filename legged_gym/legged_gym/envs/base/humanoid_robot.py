@@ -2118,10 +2118,10 @@ class HumanoidRobot(BaseTask):
         return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
     
     def _reward_deviation_hip_joint(self):
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1)
+        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_joint_indices], dim=-1) *  (self.commands[:, 4] >= 0.735)
     
     def _reward_deviation_ankle_joint(self):
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.ankle_joint_indices], dim=-1)
+        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.ankle_joint_indices], dim=-1) *  (self.commands[:, 4] >= 0.735)
     
     # def _reward_deviation_knee_joint(self):
     #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.knee_joint_indices], dim=-1)
