@@ -654,6 +654,7 @@ class HumanoidRobot(BaseTask):
                             # self.dof_vel * self.obs_scales.dof_vel,  # 12
                             # self.action_history_buf[:, -1], # 12
                             noisy_commands,   #3 x y yaw
+                            self.commands[:, 4].unsqueeze(1),
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
                             noisy_delta_yaw[:, None],           # R^1 (带噪声的朝向误差)
                             noisy_delta_pose_x[:, None],        # R^1 (带噪声的X方向位置误差)

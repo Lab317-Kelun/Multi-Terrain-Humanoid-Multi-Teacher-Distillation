@@ -237,6 +237,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
      
     class commands( LeggedRobotCfg.commands ):
         """运动命令配置"""
+        num_commands = 5  # lin_vel_x, lin_vel_y, ang_vel_yaw, heading, height
         curriculum = True           # 是否启用课程学习
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
