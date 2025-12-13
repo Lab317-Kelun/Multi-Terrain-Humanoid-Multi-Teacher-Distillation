@@ -1,4 +1,4 @@
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec12_21-33-00--homie_stage1_target_navigation_tele_stand/traced/Dec12_21-33-00--homie_stage1_target_navigation_tele_stand-2400-mujoco.onnx"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec13_10-42-12--homie_stage1_target_navigation_rewgoal_tele/traced/Dec13_10-42-12--homie_stage1_target_navigation_rewgoal_tele-600-mujoco.onnx"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 
@@ -54,7 +54,7 @@ obs_history_len: 10      # 历史长度（10步）
 # ========== 键盘控制配置 ==========
 keyboard_vel_max: 0.5        # 最大线速度 (m/s)
 keyboard_ang_vel_max: 0.5   # 最大角速度 (rad/s)
-keyboard_vel_step: 0.1      # 每次按键的速度增量 (m/s 或 rad/s)
+keyboard_vel_step: 0.05      # 每次按键的速度增量 (m/s 或 rad/s)
 # 键盘控制说明：
 #   I/K: 前进/后退 (vx)
 #   J/L: 左/右 (vy)

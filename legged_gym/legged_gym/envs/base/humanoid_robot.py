@@ -487,10 +487,10 @@ class HumanoidRobot(BaseTask):
         
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self.gym.clear_lines(self.viewer)
-            self._draw_height_samples()
+            # self._draw_height_samples()
             self._draw_goals()
             self._draw_straight_path()  # 绘制理想直线路径
-            self._draw_feet()
+            # self._draw_feet()
             if self.cfg.depth.use_camera:
                 window_name = "Depth Image"
                 cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -645,6 +645,7 @@ class HumanoidRobot(BaseTask):
         if hasattr(self, 'goal_stop_timer'):
             self.goal_stop_timer[env_ids] = 0.0
             self.goal_stopped[env_ids] = False
+            self.entered_semicircle[env_ids] = False  # 重置半圆进入状态
         
         if self.cfg.env.use_forward_goals:
             # 更新基础状态（需要先更新才能计算yaw）
@@ -1566,6 +1567,7 @@ class HumanoidRobot(BaseTask):
         self.goal_stop_timer = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 到达目标后的停止计时器
         self.goal_stop_duration = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False) * goal_stop_duration  # 停止持续时间（秒）
         self.goal_stopped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 标记是否正在停止状态
+        self.entered_semicircle = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)  # 标记是否曾经进入过半圆
         
         # 动态计算高度采样点数
         num_height_points = len(self.cfg.terrain.measured_points_x) * len(self.cfg.terrain.measured_points_y)
@@ -2147,12 +2149,12 @@ class HumanoidRobot(BaseTask):
         z_height = self.root_states[env_id, 2].cpu().item()
         
         # 绘制起点（黄色小球）
-        sphere_geom_start = gymutil.WireframeSphereGeometry(0.1, 16, 16, None, color=(1, 1, 0))
+        sphere_geom_start = gymutil.WireframeSphereGeometry(0.05, 16, 16, None, color=(1, 1, 0))
         pose_start = gymapi.Transform(gymapi.Vec3(start_pos[0], start_pos[1], z_height), r=None)
         gymutil.draw_lines(sphere_geom_start, self.gym, self.viewer, self.envs[env_id], pose_start)
         
         # 绘制直线路径（用一系列红色小球连接）
-        sphere_geom_path = gymutil.WireframeSphereGeometry(0.03, 8, 8, None, color=(1, 0, 0))  # 红色
+        sphere_geom_path = gymutil.WireframeSphereGeometry(0.02, 8, 8, None, color=(1, 0, 0))  # 红色
         num_points = 20  # 路径上的点数
         for i in range(num_points + 1):
             t = i / num_points
@@ -2163,7 +2165,7 @@ class HumanoidRobot(BaseTask):
         
         # 绘制机器人当前位置（绿色小球）
         robot_pos = self.root_states[env_id, :2].cpu().numpy()
-        sphere_geom_robot = gymutil.WireframeSphereGeometry(0.08, 16, 16, None, color=(0, 1, 0))
+        sphere_geom_robot = gymutil.WireframeSphereGeometry(0.05, 16, 16, None, color=(0, 1, 0))
         pose_robot = gymapi.Transform(gymapi.Vec3(robot_pos[0], robot_pos[1], z_height), r=None)
         gymutil.draw_lines(sphere_geom_robot, self.gym, self.viewer, self.envs[env_id], pose_robot)
         
@@ -2538,16 +2540,41 @@ class HumanoidRobot(BaseTask):
         return torch.exp(-torch.abs(next_heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
 
     def _reward_goal_reached(self):
-        # 原本的实现（已注释）
-        # # 判断是否到达目标点（基于距离阈值）
+        # 计算距离
         self.distance_to_goal = torch.norm(self.cur_goals[:, :2] - self.root_states[:, :2], dim=1)
         goal_threshold = self.cfg.env.next_goal_threshold
-        is_reached = self.distance_to_goal < goal_threshold
         
-        # 到达目标点：给奖励 1，没到达：0
-        reward = torch.where(is_reached,
-                            torch.ones_like(self.distance_to_goal),  # 到达：给奖励 1
-                            torch.zeros_like(self.distance_to_goal))  # 没到达：0
+        # 计算从起点到目标的方向（前方方向）
+        start_to_goal = self.cur_goals[:, :2] - self.goal_start_pos  # [num_envs, 2]
+        start_to_goal_norm = start_to_goal / (torch.norm(start_to_goal, dim=1, keepdim=True) + 1e-5)  # 归一化方向向量
+        
+        # 计算机器人到目标点的向量（从机器人指向目标）
+        robot_to_goal = self.cur_goals[:, :2] - self.root_states[:, :2]  # [num_envs, 2]
+        robot_to_goal_norm = robot_to_goal / (torch.norm(robot_to_goal, dim=1, keepdim=True) + 1e-5)  # 归一化
+        
+        # 判断机器人是否在目标点的前方（半圆的前半部分）
+        # 点积 > 0 表示机器人在目标点的前方（从起点到目标的方向的前方）
+        dot_product = torch.sum(robot_to_goal_norm * start_to_goal_norm, dim=1)  # [num_envs]
+        is_in_front = dot_product > 0  # 在前方（半圆的前半部分）
+        
+        # 判断是否在半圆内（距离小于阈值且在前方）
+        in_semicircle = (self.distance_to_goal < goal_threshold) & is_in_front
+        
+        # 判断是否在后半圆（距离小于阈值但不在前方）
+        in_back_semicircle = (self.distance_to_goal < goal_threshold) & (~is_in_front)
+        
+        # 更新进入半圆的状态：如果进入过半圆，标记为True
+        self.entered_semicircle = self.entered_semicircle | in_semicircle
+        
+        # 初始化奖励为0
+        reward = torch.zeros(self.num_envs, device=self.device)
+        
+        # 前半圆：给正奖励1
+        reward[in_semicircle] = 1.0
+        
+        # 后半圆：给负奖励-1
+        reward[in_back_semicircle] = -1.0
+        
         return reward
             
     def _reward_center(self):
@@ -2730,6 +2757,15 @@ class HumanoidRobot(BaseTask):
         # Penalize motion at zero commands
         contacts = torch.sum(self.contact_forces[:, self.feet_indices, 2] < 0.1, dim=-1)
         return contacts * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    
+    def _reward_stand_still_vel(self):
+        # Penalize motion at zero commands
+        # 当命令速度小于0.1时，惩罚实际的线速度xy和角速度yaw
+        zero_command_mask = torch.norm(self.commands[:, :3], dim=1) < 0.1
+        lin_vel_xy = torch.norm(self.base_lin_vel[:, :2], dim=1)  # 线速度xy分量模长
+        ang_vel_yaw = torch.abs(self.base_ang_vel[:, 2])  # 角速度yaw分量绝对值
+        # 返回线速度xy和角速度yaw的总和作为惩罚
+        return (lin_vel_xy + ang_vel_yaw) * zero_command_mask
     
     def _reward_termination(self):
         # Terminal reward / penalty

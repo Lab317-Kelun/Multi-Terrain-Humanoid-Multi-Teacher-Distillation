@@ -56,7 +56,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_envs = 2048
         num_dofs = 12     # 机器人总自由度：只使用下肢12个关节（上肢已固定）
-        episode_length_s = 35.0 #与课程学习有关 
+        episode_length_s = 45.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
@@ -78,7 +78,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         next_goal_threshold = 0.4
         reach_goal_delay = 0.1
         num_future_goal_obs = 2
-        goal_stop_duration = 1.0  # 到达目标后停止的持续时间（秒），停止期间观测的速度、角速度、误差都为0
+        goal_stop_duration = 2.0  # 到达目标后停止的持续时间（秒），停止期间观测的速度、角速度、误差都为0
         
     # 课程学习配置
     class curriculum_config:
@@ -100,7 +100,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         next_goal_threshold_success_rate = 0.7  # 成功率阈值，超过此值才降低阈值
          
         # 存活时间模式参数
-        survival_time_threshold = 35.0  # 存活时间阈值（秒）
+        survival_time_threshold = 45.0  # 存活时间阈值（秒）
         survival_success_threshold = 3  # 连续存活成功次数阈值
         survival_failure_threshold = 2   # 连续存活失败次数阈值
         
@@ -270,7 +270,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         """BEAMDOJO奖励配置"""
         class scales:
             tracking_x_vel = 1.5
-            tracking_y_vel = 1.0 #2.0
+            tracking_y_vel = 1.0
             tracking_ang_vel = 2.0
             heading_tracking = 1.0
             
@@ -308,10 +308,11 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             feet_contact_forces = -0.00025
             contact_momentum = 2.5e-4
             action_vanish = -1.0
-            stand_still = -0.5  #-0.15
+            stand_still = -0.15  #-0.15 -0.5
+            stand_still_vel = -0.3
             
             # foothold = 0.05
-            goal_reached = 1.0 #10
+            goal_reached = 10.0 #10
             
         only_positive_rewards = False
         tracking_sigma = 0.25
@@ -347,7 +348,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",
             "feet_stumble", "torques", "dof_vel", "dof_vel_limits", "torque_limits",
             "no_fly", "feet_slip", "feet_contact_forces",
-            "contact_momentum", "action_vanish", "stand_still",
+            "contact_momentum", "action_vanish", 
+            "stand_still",'stand_still_vel',
             # 'termination'
         ]
         sparse_rewards = ['foothold', 'goal_reached']

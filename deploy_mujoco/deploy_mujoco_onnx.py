@@ -91,7 +91,8 @@ def compute_proprioceptive_obs(d, config, action, cmd, cur_goal, goal_start_pos,
     
     # 如果已到达目标，所有速度命令和误差都设为0
     if goal_reached:
-        cmd[:] = 0.0
+        cmd[0] = 0.0
+        cmd[1:3] = 0.0
         delta_yaw = 0.0
         delta_pose_x = 0.0
         delta_pose_y = 0.0
