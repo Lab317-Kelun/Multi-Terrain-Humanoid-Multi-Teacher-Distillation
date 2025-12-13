@@ -253,7 +253,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
             heading = [-1.2, 1.2] 
-            # height = [-0.5, 0.0]
+            height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
         """BEAMDOJO奖励配置"""

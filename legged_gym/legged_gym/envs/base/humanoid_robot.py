@@ -483,6 +483,7 @@ class HumanoidRobot(BaseTask):
         self.action_history_buf[env_ids, :, :] = 0.
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
+        self.is_height_control[env_ids] = False
         
         # 重新采样命令
         self._resample_commands(env_ids)
@@ -493,10 +494,13 @@ class HumanoidRobot(BaseTask):
             ang_vel_cmd = 0.8 * heading_error
             ang_vel_cmd = torch.clamp(ang_vel_cmd, min=-0.5, max=0.5)
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
-            self.commands[env_ids, 2] = torch.where(small_command_mask, 
-                                                    torch.zeros_like(ang_vel_cmd), 
-                                                    ang_vel_cmd)
-        
+            # 如果正在控制高度，角速度命令设为0
+            self.commands[env_ids, 2] = torch.where(
+                small_command_mask | self.is_height_control[env_ids],
+                torch.zeros_like(ang_vel_cmd), 
+                ang_vel_cmd
+            )
+                
         # fill extras
         self.extras["episode"] = {}
         for key in self.episode_sums.keys():
@@ -817,14 +821,19 @@ class HumanoidRobot(BaseTask):
         env_ids = (self.episode_length_buf % int(self.cfg.commands.resampling_time / self.dt)==0)
         self._resample_commands(env_ids.nonzero(as_tuple=False).flatten())
         
+        # 在 heading_command 模式下，根据朝向误差计算角速度命令
         if self.cfg.commands.heading_command:
             heading_error = wrap_to_pi(self.commands[:, 3] - self.yaw)
             ang_vel_cmd = 0.8 * heading_error
             small_command_mask = torch.abs(ang_vel_cmd) <= self.cfg.commands.ang_vel_clip
-            self.commands[:, 2] = torch.where(small_command_mask, 
-                                            torch.zeros_like(ang_vel_cmd), 
-                                            ang_vel_cmd)
-        if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
+            # 如果正在控制高度，角速度命令设为0
+            self.commands[:, 2] = torch.where(
+                small_command_mask | self.is_height_control,
+                torch.zeros_like(ang_vel_cmd), 
+                ang_vel_cmd
+            )
+        
+        if self.cfg.domain_rand.push_robots and (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
         
         # 更新步态相位信息（用于交替步态）
@@ -937,38 +946,59 @@ class HumanoidRobot(BaseTask):
         return adaptive_speeds
 
     def _resample_commands(self, env_ids):
+        set_x = torch.rand(len(env_ids), 1).to(self.device)
+        is_vel = set_x > 1/2
+        is_height = set_x < 1/3
+        
+        # 保存高度控制状态（用于后续判断是否应该将速度命令设为0）
+        self.is_height_control[env_ids] = is_height.squeeze(1)
+        
         if self.cfg.commands.height_adaptive_speed:
             adaptive_speeds = self._generate_adaptive_speed(env_ids)
             self.commands[env_ids, 0] = adaptive_speeds
         else:
-            self.commands[env_ids, 0] = torch_rand_float(
-                self.command_ranges["lin_vel_x"][0],
-                self.command_ranges["lin_vel_x"][1],
-                (len(env_ids), 1), device=self.device
-            ).squeeze(1)
-            self.commands[env_ids, 1] = torch_rand_float(
+            self.commands[env_ids, 0] = (torch_rand_float(
+                self.command_ranges["lin_vel_x"][0], 
+                self.command_ranges["lin_vel_x"][1], 
+                (len(env_ids), 1), device=self.device) 
+            * is_vel).squeeze(1) 
+            self.commands[env_ids, 1] = (torch_rand_float(
                 self.command_ranges["lin_vel_y"][0],
                 self.command_ranges["lin_vel_y"][1],
-                (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+                (len(env_ids), 1), device=self.device)
+            * is_vel).squeeze(1) 
             
         if self.cfg.commands.heading_command:
-            self.commands[env_ids, 3] = torch_rand_float(
+            self.commands[env_ids, 3] = (torch_rand_float(
                 self.command_ranges["heading"][0], 
                 self.command_ranges["heading"][1], 
-                (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+                (len(env_ids), 1), device=self.device)
+            * is_vel).squeeze(1)
+            # 高度命令
+            if "height" in self.command_ranges:
+                self.commands[env_ids, 4] = (torch_rand_float(
+                    self.command_ranges["height"][0], 
+                    self.command_ranges["height"][1], 
+                    (len(env_ids), 1), device=self.device) 
+                * is_height).squeeze(1) + self.cfg.rewards.base_height_target
         else:
-            self.commands[env_ids, 2] = torch_rand_float(
+            self.commands[env_ids, 2] = (torch_rand_float(
                 self.command_ranges["ang_vel_yaw"][0],
                 self.command_ranges["ang_vel_yaw"][1],
-                (len(env_ids), 1), device=self.device
-            ).squeeze(1)
+                (len(env_ids), 1), device=self.device)
+            * is_vel).squeeze(1)
             # 只在非 heading_command 模式下对角速度命令应用死区
             small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
             self.commands[env_ids, 2] = torch.where(small_command_mask, 
                                                     torch.zeros_like(self.commands[env_ids, 2]), 
                                                     self.commands[env_ids, 2])
+            # 高度命令
+            if "height" in self.command_ranges:
+                self.commands[env_ids, 4] = (torch_rand_float(
+                    self.command_ranges["height"][0], 
+                    self.command_ranges["height"][1], 
+                    (len(env_ids), 1), device=self.device) 
+                * is_height).squeeze(1) + self.cfg.rewards.base_height_target
 
         small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
@@ -1200,6 +1230,9 @@ class HumanoidRobot(BaseTask):
         # self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.last_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)  # 到目标点的距离（统一计算，避免重复）
+        
+        # 高度控制状态（当控制高度时，速度命令应该为0）
+        self.is_height_control = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False)
         
         # 初始化步态相位相关变量
         self.phase = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
