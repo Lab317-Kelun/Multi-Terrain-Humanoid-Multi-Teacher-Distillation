@@ -2123,15 +2123,15 @@ class HumanoidRobot(BaseTask):
     def _reward_deviation_ankle_joint(self):
         return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.ankle_joint_indices], dim=-1)
     
-    def _reward_deviation_knee_joint(self):
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.knee_joint_indices], dim=-1)
-    
     # def _reward_deviation_knee_joint(self):
-    #     height_error = (self.root_states[:, 2] - self.commands[:, 4])
-    #     knee_action_min = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_min[:, self.knee_joint_indices]
-    #     knee_action_max = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_max[:, self.knee_joint_indices]
-    #     joint_deviation = (self.dof_pos[:, self.knee_joint_indices] - knee_action_min) / (knee_action_max - knee_action_min) # always positive
-    #     return torch.sum(torch.abs((joint_deviation-0.5) * height_error.unsqueeze(-1)), dim=-1)
+    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos)[:, self.knee_joint_indices], dim=-1)
+    
+    def _reward_deviation_knee_joint(self):
+        height_error = (self.root_states[:, 2] - self.commands[:, 4])
+        knee_action_min = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_min[:, self.knee_joint_indices]
+        knee_action_max = self.default_dof_pos[:, self.knee_joint_indices] + self.cfg.control.action_scale * self.action_max[:, self.knee_joint_indices]
+        joint_deviation = (self.dof_pos[:, self.knee_joint_indices] - knee_action_min) / (knee_action_max - knee_action_min) # always positive
+        return torch.sum(torch.abs((joint_deviation-0.5) * height_error.unsqueeze(-1)), dim=-1)
 
     def _reward_dof_acc(self):
         # Penalize dof accelerations (上肢已合并，dof_vel只有12维)
