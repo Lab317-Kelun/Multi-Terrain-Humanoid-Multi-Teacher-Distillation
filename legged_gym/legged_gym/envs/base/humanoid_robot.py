@@ -2080,15 +2080,6 @@ class HumanoidRobot(BaseTask):
     def _reward_next_heading_tracking(self):
         next_heading_error = wrap_to_pi(self.next_target_yaw - self.yaw)
         return torch.exp(-torch.abs(next_heading_error) / self.cfg.rewards.tracking_sigma)  # 朝向越准确奖励越高
-
-    def _reward_reach_goal(self):
-        """靠近目标奖励,远离目标惩罚"""
-        # 使用统一计算的缓冲区值，避免重复计算
-        # 计算距离变化: 负值=靠近(给奖励), 正值=远离(给惩罚)
-        distance_change = self.distance_to_goal - self.last_distance_to_goal
-        self.last_distance_to_goal = self.distance_to_goal
-        # 返回负的距离变化: 靠近->正奖励, 远离->负惩罚
-        return -distance_change
     
     def _reward_center(self):
         y_offset = torch.square(self.root_states[:, 1] - self.cur_goals[:, 1])
@@ -2098,12 +2089,12 @@ class HumanoidRobot(BaseTask):
         base_height_l = self.root_states[:, 2] - self.feet_pos[:, 0, 2]
         base_height_r = self.root_states[:, 2] - self.feet_pos[:, 1, 2]
         base_height = torch.max(base_height_l, base_height_r)
-        height_error = torch.abs(base_height - self.cfg.rewards.base_height_target + self.cfg.asset.ankle_sole_distance)
-        return torch.exp(-height_error / self.cfg.rewards.tracking_sigma)
-
+        height_error = torch.abs(base_height - self.commands[:, 4] + self.cfg.asset.ankle_sole_distance)
+        return torch.exp(-height_error * 4)
+    
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
-        return torch.square(self.base_lin_vel[:, 2])
+        return torch.square(self.base_lin_vel[:, 2]) *  (self.commands[:, 4] >= 0.735)    
         
     def _reward_ang_vel_xy(self):
         # Penalize xy axes base angular velocity
@@ -2252,8 +2243,17 @@ class HumanoidRobot(BaseTask):
     def _reward_stand_still(self):
         # Penalize motion at zero commands
         contacts = torch.sum(self.contact_forces[:, self.feet_indices, 2] < 0.1, dim=-1)
-        error_sim = contacts
+        error_sim = (contacts) * (self.commands[:, 4] >= 0.735)
         return error_sim * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+        
+    def _reward_stand_still_vel(self):
+        # Penalize motion at zero commands
+        # 当命令速度小于0.1时，惩罚实际的线速度xy和角速度yaw
+        zero_command_mask = torch.norm(self.commands[:, :3], dim=1) < 0.1
+        lin_vel_xy = torch.norm(self.base_lin_vel[:, :2], dim=1)  # 线速度xy分量模长
+        ang_vel_yaw = torch.abs(self.base_ang_vel[:, 2])  # 角速度yaw分量绝对值
+        # 返回线速度xy和角速度yaw的总和作为惩罚
+        return (lin_vel_xy + ang_vel_yaw) * zero_command_mask * (self.commands[:, 4] >= 0.735)
     
     def _reward_termination(self):
         # Terminal reward / penalty

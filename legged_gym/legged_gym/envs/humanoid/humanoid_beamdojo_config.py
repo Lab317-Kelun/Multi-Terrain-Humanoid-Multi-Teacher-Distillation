@@ -331,7 +331,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "contact_momentum", "action_vanish", "stand_still",
             # 'termination'
         ]
-        sparse_rewards = ['foothold', 'reach_goal']
+        sparse_rewards = ['foothold',]
         
     class normalization:
         """归一化配置"""
