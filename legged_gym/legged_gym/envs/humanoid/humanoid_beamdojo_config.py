@@ -61,7 +61,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 48  # 实际obs_buf维度：3(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action_history)=48
+        n_proprio = 49  # 实际obs_buf维度：4(commands)+3(ang_vel)+1(delta_yaw)+1(delta_pose_x)+1(delta_pose_y)+3(gravity)+12(dof_pos)+12(dof_vel)+12(action_history)=49
         history_len = 10
         
         # 重新计算总观测维度
@@ -72,7 +72,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         include_foot_contacts = True
         use_double_critic = True
         
-        next_goal_threshold = 0.3
+        next_goal_threshold = 0.4
         reach_goal_delay = 0.1
         num_future_goal_obs = 2
         
@@ -293,6 +293,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             contact_momentum = 2.5e-4
             action_vanish = -1.0
             stand_still = -0.15
+            stand_still_vel = -0.3
             
             # foothold = 0.05
             
@@ -328,7 +329,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",
             "feet_stumble", "torques", "dof_vel", "dof_vel_limits", "torque_limits",
             "no_fly", "feet_slip", "feet_contact_forces",
-            "contact_momentum", "action_vanish", "stand_still",
+            "contact_momentum", "action_vanish", 
+            "stand_still",
+            'stand_still_vel',
             # 'termination'
         ]
         sparse_rewards = ['foothold',]
