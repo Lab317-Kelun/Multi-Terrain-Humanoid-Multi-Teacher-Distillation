@@ -360,8 +360,8 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             gravity = 0.05
             height_measurement = 0.1
             delta_yaw = 0.05
-            delta_pose_x = 0.0
-            delta_pose_y = 0.0
+            delta_pose_x = 0.05
+            delta_pose_y = 0.05
             
     class sim:
         """仿真配置"""
