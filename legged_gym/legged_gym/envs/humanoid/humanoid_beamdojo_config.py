@@ -312,7 +312,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still_vel = -0.3
             
             # foothold = 0.05
-            goal_reached = 10.0 #10
+            goal_reached = 1.0 #10
             
         only_positive_rewards = False
         tracking_sigma = 0.25

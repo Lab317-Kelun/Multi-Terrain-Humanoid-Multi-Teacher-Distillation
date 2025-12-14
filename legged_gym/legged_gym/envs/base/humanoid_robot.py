@@ -2573,7 +2573,7 @@ class HumanoidRobot(BaseTask):
         reward[in_semicircle] = 1.0
         
         # 后半圆：给负奖励-1
-        reward[in_back_semicircle] = -1.0
+        reward[in_back_semicircle] = -2.0
         
         return reward
             
