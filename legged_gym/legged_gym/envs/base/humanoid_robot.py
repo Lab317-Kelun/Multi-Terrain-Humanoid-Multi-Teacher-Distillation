@@ -640,19 +640,6 @@ class HumanoidRobot(BaseTask):
         # phase_obs = self._obs_phase()  # [num_envs, 2] (sin_phase, cos_phase)
         
         obs_buf = torch.cat((
-                            #skill_vector, 
-                            # self.base_ang_vel  * self.obs_scales.ang_vel,   #[1,3] # 3
-                            # imu_obs,    #[1,2]  2 只包含roll和pitch
-                            # 0*self.delta_yaw[:, None], # 1
-                            # self.delta_yaw[:, None], # 1
-                            # self.delta_next_yaw[:, None],  # 1
-                            # 0*self.commands[:, 0:2],  # 2
-                            # self.commands[:, 0:1],  #[1,1]  # 1
-                            # (self.env_class != 17).float()[:, None],  #1
-                            # (self.env_class == 17).float()[:, None], # 1
-                            # (self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos, # 12
-                            # self.dof_vel * self.obs_scales.dof_vel,  # 12
-                            # self.action_history_buf[:, -1], # 12
                             noisy_commands,   #3 x y yaw
                             self.commands[:, 4].unsqueeze(1),
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
@@ -684,6 +671,15 @@ class HumanoidRobot(BaseTask):
             # print(f"torso_z: {self.rigid_body_states[0, self.torso_body_index, 2].item():.4f}")
         else:
             self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
+        
+        # 打印最终观测的详细信息（使用与训练时相同的判断逻辑：is_height_control标志）
+        # if self.common_step_counter % 10 == 0:  # 每10步打印一次
+        #     control_mode = "高度控制" if self.is_height_control[0].item() else "速度控制"
+        #     print(f"\n========== Step {self.common_step_counter} - Observation Details ==========")
+        #     print(f"控制模式: {control_mode} (根据is_height_control标志判断，与训练时一致)")
+        #     print(f"    * is_height_control: {self.is_height_control[0].item()}")
+        #     print(f"    * 实际命令值: vx={self.commands[0, 0].item():.4f}, vy={self.commands[0, 1].item():.4f}, ang_vel_yaw={self.commands[0, 2].item():.4f}, height={self.commands[0, 4].item():.4f}")
+        #     print("=" * 60)
 
         self.obs_history_buf = torch.where(
             (self.episode_length_buf <= 1)[:, None, None], 
@@ -834,6 +830,13 @@ class HumanoidRobot(BaseTask):
                 ang_vel_cmd
             )
         
+        # 如果正在控制高度，确保线速度命令也为0（完全解耦）
+        if self.is_height_control.any():
+            self.commands[self.is_height_control, 0] = 0.0  # vx
+            self.commands[self.is_height_control, 1] = 0.0  # vy
+            if self.cfg.commands.heading_command:
+                self.commands[self.is_height_control, 3] = self.yaw[self.is_height_control]  # heading保持当前朝向
+        
         if self.cfg.domain_rand.push_robots and (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
         
@@ -975,31 +978,22 @@ class HumanoidRobot(BaseTask):
                 self.command_ranges["heading"][1], 
                 (len(env_ids), 1), device=self.device)
             * is_vel).squeeze(1)
-            # 高度命令
-            if "height" in self.command_ranges:
-                self.commands[env_ids, 4] = (torch_rand_float(
-                    self.command_ranges["height"][0], 
-                    self.command_ranges["height"][1], 
-                    (len(env_ids), 1), device=self.device) 
-                * is_height).squeeze(1) + self.cfg.rewards.base_height_target
         else:
             self.commands[env_ids, 2] = (torch_rand_float(
                 self.command_ranges["ang_vel_yaw"][0],
                 self.command_ranges["ang_vel_yaw"][1],
                 (len(env_ids), 1), device=self.device)
             * is_vel).squeeze(1)
-            # 只在非 heading_command 模式下对角速度命令应用死区
             small_command_mask = torch.abs(self.commands[env_ids, 2]) <= self.cfg.commands.ang_vel_clip
             self.commands[env_ids, 2] = torch.where(small_command_mask, 
                                                     torch.zeros_like(self.commands[env_ids, 2]), 
                                                     self.commands[env_ids, 2])
-            # 高度命令
-            if "height" in self.command_ranges:
-                self.commands[env_ids, 4] = (torch_rand_float(
-                    self.command_ranges["height"][0], 
-                    self.command_ranges["height"][1], 
-                    (len(env_ids), 1), device=self.device) 
-                * is_height).squeeze(1) + self.cfg.rewards.base_height_target
+            
+        self.commands[env_ids, 4] = (torch_rand_float(
+            self.command_ranges["height"][0], 
+            self.command_ranges["height"][1], 
+            (len(env_ids), 1), device=self.device) 
+        * is_height).squeeze(1) + self.cfg.rewards.base_height_target
 
         small_lin_vel_x_mask = torch.abs(self.commands[env_ids, 0]) <= self.cfg.commands.lin_vel_clip
         small_lin_vel_y_mask = torch.abs(self.commands[env_ids, 1]) <= self.cfg.commands.lin_vel_clip
@@ -2150,7 +2144,7 @@ class HumanoidRobot(BaseTask):
         feet_height, feet_height_var = self._get_feet_heights()
         height_error = torch.square(feet_height - self.cfg.rewards.clearance_height_target).view(self.num_envs, -1)
         feet_leteral_vel = torch.sqrt(torch.sum(torch.square(feetvel_in_body_frame[:, :, :2]), dim=2)).view(self.num_envs, -1)
-        return torch.sum(height_error * feet_leteral_vel, dim=1)
+        return torch.sum(height_error * feet_leteral_vel, dim=1) * (self.commands[:, 4]>=0.71)
     
     def _reward_feet_distance_lateral(self):
         cur_footpos_translated = self.feet_pos - self.root_states[:, 0:3].unsqueeze(1)
@@ -2158,7 +2152,7 @@ class HumanoidRobot(BaseTask):
         for i in range(len(self.feet_indices)):
             footpos_in_body_frame[:, i, :] = quat_rotate_inverse(self.base_quat, cur_footpos_translated[:, i, :])
         foot_leteral_dis = torch.abs(footpos_in_body_frame[:, 0, 1] - footpos_in_body_frame[:, 1, 1])
-        return torch.clamp(foot_leteral_dis - self.cfg.rewards.least_feet_distance_lateral, max=0) + torch.clamp(-foot_leteral_dis + self.cfg.rewards.most_feet_distance_lateral, max=0)
+        return torch.clamp(foot_leteral_dis - self.cfg.rewards.least_feet_distance_lateral, max=0) + torch.clamp(-foot_leteral_dis + self.cfg.rewards.most_feet_distance_lateral, max=0) * (self.commands[:, 4] >= 0.735)
     
     def _reward_knee_distance_lateral(self):
         cur_knee_pos_translated = self.rigid_body_states[:, self.knee_indices, :3].clone() - self.root_states[:, 0:3].unsqueeze(1)
@@ -2166,8 +2160,8 @@ class HumanoidRobot(BaseTask):
         for i in range(len(self.knee_indices)):
             knee_pos_in_body_frame[:, i, :] = quat_rotate_inverse(self.base_quat, cur_knee_pos_translated[:, i, :])
         knee_lateral_dis = torch.abs(knee_pos_in_body_frame[:, 0, 1] - knee_pos_in_body_frame[:, 2, 1]) + torch.abs(knee_pos_in_body_frame[:, 1, 1] - knee_pos_in_body_frame[:, 3, 1])
-        return torch.clamp(knee_lateral_dis - self.cfg.rewards.least_knee_distance_lateral * 2, max=0) + torch.clamp(-knee_lateral_dis + self.cfg.rewards.most_knee_distance_lateral * 2, max=0)
-    
+        return torch.clamp(knee_lateral_dis - self.cfg.rewards.least_knee_distance_lateral * 2, max=0) + torch.clamp(-knee_lateral_dis + self.cfg.rewards.most_knee_distance_lateral * 2, max=0) * (self.commands[:, 4] >= 0.735)
+        
     def _reward_feet_ground_parallel(self):
         feet_heights, feet_heights_var = self._get_feet_heights()
         continue_contact = (self.feet_air_time >= 3* self.dt) * self.contact_filt
@@ -2177,9 +2171,8 @@ class HumanoidRobot(BaseTask):
         left_foot_pos = self.rigid_body_states[:, self.left_foot_indices[0:3], :3].clone()
         right_foot_pos = self.rigid_body_states[:, self.right_foot_indices[0:3], :3].clone()
         feet_distances = torch.norm(left_foot_pos - right_foot_pos, dim=2)
-        feet_distances_var = torch.var(feet_distances, dim=1, unbiased=False)
-        feet_distances_var = torch.nan_to_num(feet_distances_var, nan=0.0, posinf=0.0, neginf=0.0)
-        return feet_distances_var
+        feet_distances_var = torch.var(feet_distances, dim=1)
+        return feet_distances_var * (self.commands[:, 4] >= 0.735)
     
     def _reward_smoothness(self):
         # second order smoothness

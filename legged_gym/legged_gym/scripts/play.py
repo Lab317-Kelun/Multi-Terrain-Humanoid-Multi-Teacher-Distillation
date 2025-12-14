@@ -58,7 +58,7 @@ def play(args):
 
     env_cfg.env.num_envs = 1
     env_cfg.env.episode_length_s = 35
-    env_cfg.commands.resampling_time = 4
+    env_cfg.commands.resampling_time = 2
     env_cfg.rewards.is_play = True
 
     env_cfg.curriculum_config.success_mode = 'goal_reached'
@@ -69,10 +69,10 @@ def play(args):
     env_cfg.commands.ranges.lin_vel_x = [0.5, 0.6]
     env_cfg.commands.ranges.lin_vel_y = [-0.0, 0.0]
     env_cfg.commands.ranges.ang_vel_yaw = [-0.0, 0.0]
-    env_cfg.commands.ranges.heading = [-0.0, 0.0]
-    env_cfg.commands.ranges.height = [-0.0, 0.0]
+    env_cfg.commands.ranges.heading = [-1.2, 1.2]
+    env_cfg.commands.ranges.height = [-0.5, 0.0]
     
-    env_cfg.terrain.num_rows = 2
+    env_cfg.terrain.num_rows = 1
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.max_init_terrain_level = 0
 
