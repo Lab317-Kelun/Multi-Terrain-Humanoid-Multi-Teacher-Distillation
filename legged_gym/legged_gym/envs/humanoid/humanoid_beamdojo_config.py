@@ -249,10 +249,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [-0.8, 1.0] # min max [m/s]
+            lin_vel_x = [0.0, 0.0] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
-            heading = [-1.2, 1.2] 
+            heading = [0.0, 0.0] 
             # height = [-0.5, 0.0]
                         
     class rewards(LeggedRobotCfg.rewards):
@@ -293,6 +293,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             contact_momentum = 2.5e-4
             action_vanish = -1.0
             stand_still = -0.15
+            stand_still_vel = -0.3
             
             # foothold = 0.05
             
@@ -328,7 +329,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             "feet_ground_parallel", "feet_parallel", "smoothness", "joint_power",
             "feet_stumble", "torques", "dof_vel", "dof_vel_limits", "torque_limits",
             "no_fly", "feet_slip", "feet_contact_forces",
-            "contact_momentum", "action_vanish", "stand_still",
+            "contact_momentum", "action_vanish", "stand_still",'stand_still_vel'
             # 'termination'
         ]
         sparse_rewards = ['foothold', 'reach_goal']

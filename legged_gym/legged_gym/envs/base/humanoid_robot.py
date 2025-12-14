@@ -2222,6 +2222,15 @@ class HumanoidRobot(BaseTask):
         error_sim = contacts
         return error_sim * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
     
+    def _reward_stand_still_vel(self):
+        # Penalize motion at zero commands
+        # 当命令速度小于0.1时，惩罚实际的线速度xy和角速度yaw
+        zero_command_mask = torch.norm(self.commands[:, :3], dim=1) < 0.1
+        lin_vel_xy = torch.norm(self.base_lin_vel[:, :2], dim=1)  # 线速度xy分量模长
+        ang_vel_yaw = torch.abs(self.base_ang_vel[:, 2])  # 角速度yaw分量绝对值
+        # 返回线速度xy和角速度yaw的总和作为惩罚
+        return (lin_vel_xy + ang_vel_yaw) * zero_command_mask
+    
     def _reward_termination(self):
         # Terminal reward / penalty
         return self.reset_buf * ~self.time_out_buf
