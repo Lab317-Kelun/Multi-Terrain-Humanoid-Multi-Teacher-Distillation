@@ -54,7 +54,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         }
 
     class env(LeggedRobotCfg.env):
-        num_envs = 2048
+        num_envs = 4096
         num_dofs = 12     # 机器人总自由度：只使用下肢12个关节（上肢已固定）
         episode_length_s = 20.0 #与课程学习有关 
         

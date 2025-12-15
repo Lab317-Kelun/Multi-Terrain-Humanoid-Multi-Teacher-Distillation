@@ -673,13 +673,13 @@ class HumanoidRobot(BaseTask):
             self.obs_buf = torch.cat([obs_buf, priv_explicit, priv_latent, self.obs_history_buf.view(self.num_envs, -1)], dim=-1)
         
         # 打印最终观测的详细信息（使用与训练时相同的判断逻辑：is_height_control标志）
-        # if self.common_step_counter % 10 == 0:  # 每10步打印一次
-        #     control_mode = "高度控制" if self.is_height_control[0].item() else "速度控制"
-        #     print(f"\n========== Step {self.common_step_counter} - Observation Details ==========")
-        #     print(f"控制模式: {control_mode} (根据is_height_control标志判断，与训练时一致)")
-        #     print(f"    * is_height_control: {self.is_height_control[0].item()}")
-        #     print(f"    * 实际命令值: vx={self.commands[0, 0].item():.4f}, vy={self.commands[0, 1].item():.4f}, ang_vel_yaw={self.commands[0, 2].item():.4f}, height={self.commands[0, 4].item():.4f}")
-        #     print("=" * 60)
+        if self.common_step_counter % 10 == 0:  # 每10步打印一次
+            control_mode = "高度控制" if self.is_height_control[0].item() else "速度控制"
+            print(f"\n========== Step {self.common_step_counter} - Observation Details ==========")
+            print(f"控制模式: {control_mode} (根据is_height_control标志判断，与训练时一致)")
+            print(f"    * is_height_control: {self.is_height_control[0].item()}")
+            print(f"    * 实际命令值: vx={self.commands[0, 0].item():.4f}, vy={self.commands[0, 1].item():.4f}, ang_vel_yaw={self.commands[0, 2].item():.4f}, height={self.commands[0, 4].item():.4f}")
+            print("=" * 60)
 
         self.obs_history_buf = torch.where(
             (self.episode_length_buf <= 1)[:, None, None], 
@@ -951,8 +951,8 @@ class HumanoidRobot(BaseTask):
 
     def _resample_commands(self, env_ids):
         set_x = torch.rand(len(env_ids), 1).to(self.device)
-        is_vel = set_x > 1/2
-        is_height = set_x < 1/3
+        is_vel = set_x >= 1/2
+        is_height = set_x < 1/2
         
         # 保存高度控制状态（用于后续判断是否应该将速度命令设为0）
         self.is_height_control[env_ids] = is_height.squeeze(1)
