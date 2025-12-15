@@ -1,4 +1,4 @@
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec15_01-33-59--homie_stage1_target_navigation_goal5s_10_-1/traced/Dec15_01-33-59--homie_stage1_target_navigation_goal5s_10_-1-6000-mujoco.onnx"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec15_01-33-59--homie_stage1_target_navigation_goal5s_10_-1/traced/Dec15_01-33-59--homie_stage1_target_navigation_goal5s_10_-1-10000-mujoco.onnx"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
 xml_path: "./resources/robots/g1_description/g1.xml"
 
