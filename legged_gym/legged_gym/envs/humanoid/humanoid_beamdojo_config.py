@@ -55,13 +55,13 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
 
     class env(LeggedRobotCfg.env):
         num_envs = 2048
-        num_dofs = 27     # 机器人总自由度：全身27个关节
+        num_dofs = 12     # 机器人总自由度：全身27个关节
         episode_length_s = 20.0 #与课程学习有关 
         
         n_scan = 225
         n_priv = 3
         n_priv_latent = 4 + 1 + 12 + 12  # 潜在状态维度
-        n_proprio = 75  # 实际obs_buf维度：3+3+3+27+27+12=75
+        n_proprio = 45  # 实际obs_buf维度：3+3+3+27+27+12=75
         history_len = 10
         
         # 重新计算总观测维度
@@ -70,19 +70,19 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         # 启用接触信息
         include_foot_contacts = True
-        #use_double_critic = False
+        use_double_critic = True
         
-        next_goal_threshold = 0.4
+        next_goal_threshold = 0.5
         reach_goal_delay = 0.05
         num_future_goal_obs = 2
         
     # 课程学习配置
     class curriculum_config:
         # === 课程学习成功判定模式 ===
-        success_mode = 'survival_time'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
+        success_mode = 'goal_reached'  # 'goal_reached': 到达目标点, 'survival_time': 存活指定时间, 'vel_tracking': 速度跟踪
         
         # === 成功率计算模式 (用于日志记录) ===
-        success_rate_mode = 'survival_time'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
+        success_rate_mode = 'goal_based'  # 'survival_time': 基于存活时间, 'goal_based': 基于目标完成度
         
         # 目标到达模式参数
         success_threshold = 3  # 连续成功次数阈值
@@ -232,6 +232,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         knee_names = ["left_knee_link", "left_hip_yaw_link", "right_knee_link", "right_hip_yaw_link"]
         self_collision = 1
         flip_visual_attachments = False
+        collapse_fixed_joints = True  # 合并fixed关节（上肢已改为fixed）
         ankle_sole_distance = 0.02
 
     class commands( LeggedRobotCfg.commands ):
@@ -239,7 +240,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         curriculum = True           # 是否启用课程学习
         resampling_time = 4.0         # 命令重采样时间间隔（秒）
         heading_command = True         # 启用朝向命令模式
-        ang_vel_clip = 0.05            # 角速度命令死区阈值
+        ang_vel_clip = 0.0            # 角速度命令死区阈值
         lin_vel_clip = 0.1            # 线速度命令死区阈值
         
         # 策略1：智能速度生成配置
@@ -248,7 +249,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         speed_gradient_weight = 0.4   # 高度梯度权重  
         speed_roughness_weight = 0.2  # 地形粗糙度权重
         class ranges( LeggedRobotCfg.commands.ranges ):
-            lin_vel_x = [0.5, 1.5] # min max [m/s]
+            lin_vel_x = [0.5, 1.0] # min max [m/s]
             lin_vel_y = [-0.0, 0.0]   # min max [m/s]
             ang_vel_yaw = [-0.0, 0.0]    # min max [rad/s]
             heading = [-0.0, 0.0] # base goal heading
@@ -257,7 +258,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         """BEAMDOJO奖励配置"""
         class scales:
-            tracking_x_vel = 1.5
+            tracking_x_vel = 2.5 #1.5
             tracking_y_vel = 1.
             tracking_ang_vel = 2.0 #2.0
             heading_tracking = 1.0 #2.0 3.0
@@ -299,9 +300,9 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
             stand_still = -0.15   
             # termination = -20 #-10 -20 -30
             
-            foothold = 0.05 #0.05 0.1 0.025
+            foothold = 0.025 #0.05 0.1 0.025
             
-        only_positive_rewards = False #True
+        only_positive_rewards = False 
         tracking_sigma = 0.25
         soft_dof_pos_limit = 0.975
         soft_dof_vel_limit = 0.80
@@ -356,10 +357,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         add_noise = True
         noise_level = 1.0
         class noise_scales:
-            dof_pos = 0.02
-            dof_vel = 2.0
+            dof_pos = 0.01
+            dof_vel = 1.5
             lin_vel = 0.1
-            ang_vel = 0.5
+            ang_vel = 0.2
             gravity = 0.05
             height_measurement = 0.1
             
@@ -401,7 +402,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         tanh_encoder_output = False  # 编码器输出是否使用tanh激活
         
         # 支持双Critic的编码器
-        use_double_critic = False  # 在这里可以启用双Critic
+        use_double_critic = True  # 在这里可以启用双Critic
         
     class algorithm(LeggedRobotCfgPPO.algorithm):
         """BEAMDOJO PPO算法配置"""
@@ -421,7 +422,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         adam_epsilon = 1e-8
         
         # BEAMDOJO双Critic配置
-        use_double_critic = False      # 设置为True启用双Critic
+        use_double_critic = True      # 设置为True启用双Critic
         dense_value_loss_coef = 1.0    # 密集奖励价值损失系数
         sparse_value_loss_coef = 1.0   # 稀疏奖励价值损失系数
         advantage_merge_weight = 0.5   # 优势函数合并权重

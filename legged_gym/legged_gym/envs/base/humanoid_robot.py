@@ -222,8 +222,7 @@ class HumanoidRobot(BaseTask):
                     self.last_times = self.total_times
                     
 
-        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
-        if use_double_critic and hasattr(self, 'dense_rew_buf') and hasattr(self, 'sparse_rew_buf'):
+        if self.cfg.env.use_double_critic:
             rewards = {
                 'dense': self.dense_rew_buf,
                 'sparse': self.sparse_rew_buf
@@ -232,7 +231,7 @@ class HumanoidRobot(BaseTask):
             rewards = self.rew_buf
 
         return self.obs_buf, self.privileged_obs_buf, rewards, self.reset_buf, self.extras
-
+    
     def get_history_observations(self):
         return self.obs_history_buf
     
@@ -520,9 +519,7 @@ class HumanoidRobot(BaseTask):
         """
         self.rew_buf[:] = 0.
         
-        use_double_critic = hasattr(self.cfg, 'algorithm') and hasattr(self.cfg.algorithm, 'use_double_critic') and self.cfg.algorithm.use_double_critic
-        
-        if use_double_critic:
+        if self.cfg.env.use_double_critic:
             # 初始化密集和稀疏奖励缓冲区
             if not hasattr(self, 'dense_rew_buf'):
                 self.dense_rew_buf = torch.zeros_like(self.rew_buf)
@@ -633,27 +630,8 @@ class HumanoidRobot(BaseTask):
         noisy_dof_vel = noisy_dof_vel * self.obs_scales.dof_vel
         noisy_ang_vel = noisy_ang_vel * self.obs_scales.ang_vel
         noisy_commands = self.commands[:, 0:3] * self.commands_scale
-
-        # print(f"noisy_ang_vel: {noisy_ang_vel}")
-        # print(f"self.commands[:, 0:3]: {self.commands[:, 0:3]}")
-        
-        
         
         obs_buf = torch.cat((
-                            #skill_vector, 
-                            # self.base_ang_vel  * self.obs_scales.ang_vel,   #[1,3] # 3
-                            # imu_obs,    #[1,2]  2 只包含roll和pitch
-                            # 0*self.delta_yaw[:, None], # 1
-                            # self.delta_yaw[:, None], # 1
-                            # self.delta_next_yaw[:, None],  # 1
-                            # 0*self.commands[:, 0:2],  # 2
-                            # self.commands[:, 0:1],  #[1,1]  # 1
-                            # (self.env_class != 17).float()[:, None],  #1
-                            # (self.env_class == 17).float()[:, None], # 1
-                            # (self.dof_pos - self.default_dof_pos_all) * self.obs_scales.dof_pos, # 12
-                            # self.dof_vel * self.obs_scales.dof_vel,  # 12
-                            # self.action_history_buf[:, -1], # 12
-                            # self.contact_filt.float()-0.5, # 2
                             noisy_commands,   #3 x y yaw
                             noisy_ang_vel,           # R^3 (带噪声的角速度)
                             noisy_gravity,           # R^3 (带噪声的重力)
@@ -1201,9 +1179,9 @@ class HumanoidRobot(BaseTask):
         print(f"Action min: {self.action_min}")
         print(f"Action max: {self.action_max}")
         
-        self.random_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
-        self.current_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
-        self.delta_upper_actions = torch.zeros((self.num_envs, 1), device=self.device)
+        # self.random_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
+        # self.current_upper_actions = torch.zeros((self.num_envs, self.num_actions - self.num_lower_dof), device=self.device)
+        # self.delta_upper_actions = torch.zeros((self.num_envs, 1), device=self.device)
         self.joint_injection = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.actuation_offset = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         
@@ -1393,9 +1371,9 @@ class HumanoidRobot(BaseTask):
         if self.cfg.domain_rand.randomize_body_displacement:
             self.body_displacement = torch_rand_float(self.cfg.domain_rand.body_displacement_range[0], self.cfg.domain_rand.body_displacement_range[1], (self.num_envs, 3), device=self.device)
         
-        self.torso_body_index = self.body_names.index("torso_link")
-        self.left_hand_index = self.body_names.index("left_hand_palm_link")
-        self.right_hand_index = self.body_names.index("right_hand_palm_link")   
+        # self.torso_body_index = self.body_names.index("torso_link")
+        # self.left_hand_index = self.body_names.index("left_hand_palm_link")
+        # self.right_hand_index = self.body_names.index("right_hand_palm_link")   
         
         self.mass_params_tensor = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
  
@@ -1415,10 +1393,10 @@ class HumanoidRobot(BaseTask):
             actor_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, self.cfg.asset.name, i, self.cfg.asset.self_collisions, 0)
             dof_props = self._process_dof_props(dof_props_asset, i)
             
-            dof_props["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
-            dof_props["stiffness"][12:] = [300., 200., 200., 200., 100.,  20.,  20.,  20., 200., 200., 200., 100.,  20.,  20.,  20.]
-            dof_props["damping"][12:] = [5.0000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000,
-                                            0.5000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000, 0.5000]
+            # dof_props["driveMode"][12:].fill(gymapi.DOF_MODE_POS)
+            # dof_props["stiffness"][12:] = [300., 200., 200., 200., 100.,  20.,  20.,  20., 200., 200., 200., 100.,  20.,  20.,  20.]
+            # dof_props["damping"][12:] = [5.0000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000,
+                                            # 0.5000, 4.0000, 4.0000, 4.0000, 1.0000, 0.5000, 0.5000, 0.5000]
         
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
