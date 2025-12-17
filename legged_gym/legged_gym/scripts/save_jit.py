@@ -81,7 +81,7 @@ class MuJoCoDeployNN(nn.Module):
 def main(args):    
     # humanoid_beamdojo 配置（来自 humanoid_beamdojo_config.py）
     # 本体感受观测维度（只包含下肢12个关节）：commands(3) + ang_vel(3) + delta_yaw(1) + delta_pose_x(1) + delta_pose_y(1) + gravity(3) + dof_pos(12) + dof_vel(12) + action_history(12) = 48
-    n_proprio = 48
+    n_proprio = 45
     n_priv_explicit = 3  # base_lin_vel (x, y, z)
     n_priv_latent = 4 + 1 + 12 + 12  # 质量参数(4) + 摩擦系数(1) + 电机强度(12+12) = 29
     num_scan = 225  # 15×15 高度扫描点

@@ -120,6 +120,7 @@ def compute_full_observation(m, d, config, action, cmd, scan_points_body, obs_hi
     if config.get('measure_heights', True) and config.get('use_lidar', True) and config.get('lidar_mode') == 'terrain':
         measured_heights = get_scan_from_terrain(m, d, scan_points_body)
         heights = (d.qpos[2] - measured_heights).astype(np.float32)
+        # print('hieghts',heights)
     else:
         heights = np.zeros(num_scan, dtype=np.float32)
     
