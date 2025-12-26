@@ -125,25 +125,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         hip_reduction = 1.0
     
     class domain_rand(LeggedRobotCfg.domain_rand):
-        randomize_friction = True            # 随机化摩擦系数
-        friction_range = [0.8, 0.8]         # 恢复原始摩擦系数
-        randomize_base_mass = True          # 随机化质量
-        added_mass_range = [-2.0, 2.0]      # 负载质量 U(-2.0, 2.0) kg
-        randomize_base_com = True           # 随机化质心位置
-        added_com_range = [-0.05, 0.05]     # 质心偏移 U(-0.05, 0.05) m
-        push_robots = True                   # 启用外部推力（抗干扰训练）
-        push_interval_s = 8                  # 推力间隔：每8秒推一次
-        max_push_vel_xy = 0.5                # 最大推力速度：±0.5 m/s
-
-        randomize_motor = True              # 随机化电机特性
-        motor_strength_range = [0.9, 1.1]   # 电机强度噪声 U(0.9, 1.1)
-        
-        randomize_actuator_offset = True    # 随机化执行器零位偏移
-        actuator_offset_range = [-0.05, 0.05]  # 执行器偏移 U(-0.05, 0.05) rad
-        
-        randomize_pd_gains = True           # 随机化PD增益
-        pd_gain_range = [0.85, 1.15]        # Kp/Kd噪声因子 U(0.85, 1.15)
-
         # 动作延迟相关参数（BeamDojo域随机化）
         delay_update_global_steps = 24 * 8000  # 延迟更新的全局步数
         action_delay = True              # 是否启用动作延迟
@@ -165,7 +146,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         hand_payload_mass_range = [-0.1, 0.3]
 
-        randomize_com_displacement = use_random
+        randomize_com_displacement = False
         com_displacement_range = [-0.1, 0.1]
         
         randomize_body_displacement = use_random
@@ -192,20 +173,11 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         push_robots = use_random
         push_interval_s = 4
-        upper_interval_s = 1  # 保留（虽然上肢已固定，但某些代码可能引用）
+        upper_interval_s = 1
         max_push_vel_xy = 0.5
         
-        init_upper_ratio = 0.  # 保留（代码中被引用）
+        init_upper_ratio = 0.
         delay = use_random
-        
-        randomize_start_pos = False    # 是否随机化起始位置
-        randomize_start_vel = False    # 是否随机化起始速度
-        randomize_start_yaw = False    # 是否随机化起始偏航角
-        rand_yaw_range = 1.2          # 偏航角随机范围
-        randomize_start_y = False     # 是否随机化Y轴起始位置
-        rand_y_range = 0.5            # Y轴随机范围
-        randomize_start_pitch = False  # 是否随机化起始俯仰角
-        rand_pitch_range = 1.6        # 俯仰角随机范围
 
     class asset( LeggedRobotCfg.asset ):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/g1_description/g1.urdf'
@@ -345,10 +317,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         add_noise = True
         noise_level = 1.0
         class noise_scales:
-            dof_pos = 0.01
-            dof_vel = 1.5
+            dof_pos = 0.02
+            dof_vel = 2.0
             lin_vel = 0.1
-            ang_vel = 0.2
+            ang_vel = 0.5
             gravity = 0.05
             height_measurement = 0.1
             
