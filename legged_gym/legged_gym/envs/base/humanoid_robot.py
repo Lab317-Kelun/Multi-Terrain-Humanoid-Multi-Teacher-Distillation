@@ -487,6 +487,16 @@ class HumanoidRobot(BaseTask):
         # 重新采样命令
         self._resample_commands(env_ids)
         
+        # reset randomized props
+        if self.cfg.domain_rand.randomize_kp:
+            self.Kp_factors[env_ids] = torch_rand_float(self.cfg.domain_rand.kp_range[0], self.cfg.domain_rand.kp_range[1], (len(env_ids), self.num_actions), device=self.device)
+        if self.cfg.domain_rand.randomize_kd:
+            self.Kd_factors[env_ids] = torch_rand_float(self.cfg.domain_rand.kd_range[0], self.cfg.domain_rand.kd_range[1], (len(env_ids), self.num_actions), device=self.device)
+        if self.cfg.domain_rand.randomize_joint_injection:
+            self.joint_injection[env_ids] = torch_rand_float(self.cfg.domain_rand.joint_injection_range[0], self.cfg.domain_rand.joint_injection_range[1], (len(env_ids), self.num_dof), device=self.device) * self.torque_limits.unsqueeze(0)
+        if self.cfg.domain_rand.randomize_actuation_offset:
+            self.actuation_offset[env_ids] = torch_rand_float(self.cfg.domain_rand.actuation_offset_range[0], self.cfg.domain_rand.actuation_offset_range[1], (len(env_ids), self.num_dof), device=self.device) * self.torque_limits.unsqueeze(0)
+        
         # 如果使用 heading_command 模式，重置后立即计算角速度命令
         if self.cfg.commands.heading_command:
             heading_error = wrap_to_pi(self.commands[env_ids, 3] - self.yaw[env_ids])
@@ -755,6 +765,16 @@ class HumanoidRobot(BaseTask):
                 self.friction_coeffs = friction_buckets[bucket_ids]
             for s in range(len(props)):
                 props[s].friction = self.friction_coeffs[env_id]
+        
+        if self.cfg.domain_rand.randomize_restitution:
+            if env_id==0:
+                # prepare restitution randomization
+                restitution_range = self.cfg.domain_rand.restitution_range
+                self.restitution_coeffs = torch_rand_float(restitution_range[0], restitution_range[1], (self.num_envs,1), device=self.device)
+
+            for s in range(len(props)):
+                props[s].restitution = self.restitution_coeffs[env_id]
+        
         return props
 
     def _process_dof_props(self, props, env_id):
@@ -790,18 +810,23 @@ class HumanoidRobot(BaseTask):
 
     def _process_rigid_body_props(self, props, env_id):
         # No need to use tensors as only called upon env creation
+        rand_mass = np.zeros((1, ))
         if self.cfg.domain_rand.randomize_base_mass:
             rng_mass = self.cfg.domain_rand.added_mass_range
             rand_mass = np.random.uniform(rng_mass[0], rng_mass[1], size=(1, ))
             props[0].mass += rand_mass
-        else:
-            rand_mass = np.zeros((1, ))
-        if self.cfg.domain_rand.randomize_base_com:
-            rng_com = self.cfg.domain_rand.added_com_range
-            rand_com = np.random.uniform(rng_com[0], rng_com[1], size=(3, ))
-            props[0].com += gymapi.Vec3(*rand_com)
-        else:
-            rand_com = np.zeros(3)
+        
+        rand_com = np.zeros(3)
+        if self.cfg.domain_rand.randomize_com_displacement:
+            rand_com = self.com_displacement[env_id].cpu().numpy()
+            props[0].com = self.default_com + gymapi.Vec3(*rand_com)
+        
+        if self.cfg.domain_rand.randomize_link_mass:
+            rng = self.cfg.domain_rand.link_mass_range
+            for i in range(1, len(props)):
+                scale = np.random.uniform(rng[0], rng[1])
+                props[i].mass = scale * self.default_rigid_body_mass[i].item()
+        
         mass_params = np.concatenate([rand_mass, rand_com])
         return props, mass_params
     
@@ -996,12 +1021,14 @@ class HumanoidRobot(BaseTask):
         control_type = self.cfg.control.control_type
         if control_type=="P":
             if not self.cfg.domain_rand.randomize_motor:  # TODO add strength to gain directly
-                torques = self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains*self.dof_vel
+                torques = self.p_gains * self.Kp_factors * (actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.d_gains * self.Kd_factors * self.dof_vel
             else:
-                torques = self.motor_strength[0] * self.p_gains*(actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.motor_strength[1] * self.d_gains*self.dof_vel
+                torques = self.motor_strength[0] * self.p_gains * self.Kp_factors * (actions_scaled + self.default_dof_pos_all - self.dof_pos) - self.motor_strength[1] * self.d_gains * self.Kd_factors * self.dof_vel
+            torques = torques + self.actuation_offset + self.joint_injection
                 
         elif control_type=="V":
-            torques = self.p_gains*(actions_scaled - self.dof_vel) - self.d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
+            torques = self.p_gains * self.Kp_factors * (actions_scaled - self.dof_vel) - self.d_gains * self.Kd_factors * (self.dof_vel - self.last_dof_vel)/self.sim_params.dt
+            torques = torques + self.actuation_offset + self.joint_injection
         elif control_type=="T":
             torques = actions_scaled
         else:
@@ -1016,8 +1043,15 @@ class HumanoidRobot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
         """
-        # self.dof_pos[env_ids] = self.default_dof_pos + torch_rand_float(0., 0.9, (len(env_ids), self.num_dof), device=self.device)
-        self.dof_pos[env_ids] = self.default_dof_pos
+        dof_upper = self.dof_pos_limits[:, 1].view(1, -1)
+        dof_lower = self.dof_pos_limits[:, 0].view(1, -1)
+        if self.cfg.domain_rand.randomize_initial_joint_pos:
+            init_dos_pos = self.default_dof_pos * torch_rand_float(self.cfg.domain_rand.initial_joint_pos_scale[0], self.cfg.domain_rand.initial_joint_pos_scale[1], (len(env_ids), self.num_dof), device=self.device)
+            init_dos_pos += torch_rand_float(self.cfg.domain_rand.initial_joint_pos_offset[0], self.cfg.domain_rand.initial_joint_pos_offset[1], (len(env_ids), self.num_dof), device=self.device)
+            self.dof_pos[env_ids] = torch.clip(init_dos_pos, dof_lower, dof_upper)
+        else:
+            self.dof_pos[env_ids] = self.default_dof_pos
+        
         self.dof_vel[env_ids] = 0.
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)
@@ -1032,26 +1066,28 @@ class HumanoidRobot(BaseTask):
         Args:
             env_ids (List[int]): Environemnt ids
         """
-        # base position
+        self.root_states[env_ids] = self.base_init_state
+        self.root_states[env_ids, :3] += self.env_origins[env_ids]
+        
         if self.custom_origins:
-            self.root_states[env_ids] = self.base_init_state
-            self.root_states[env_ids, :3] += self.env_origins[env_ids]
-            if self.cfg.env.randomize_start_pos:
-                self.root_states[env_ids, :2] += torch_rand_float(-0.3, 0.3, (len(env_ids), 2), device=self.device) # xy position within 1m of the center
-            if self.cfg.env.randomize_start_yaw:
-                rand_yaw = self.cfg.env.rand_yaw_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
-                if self.cfg.env.randomize_start_pitch:
-                    rand_pitch = self.cfg.env.rand_pitch_range*torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
+            if self.cfg.domain_rand.randomize_start_pos:
+                self.root_states[env_ids, :2] += torch_rand_float(-0.3, 0.3, (len(env_ids), 2), device=self.device)
+            
+            if self.cfg.domain_rand.randomize_start_y:
+                self.root_states[env_ids, 1] += self.cfg.domain_rand.rand_y_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
+            
+            if self.cfg.domain_rand.randomize_start_yaw or self.cfg.domain_rand.randomize_start_pitch:
+                if self.cfg.domain_rand.randomize_start_yaw:
+                    rand_yaw = self.cfg.domain_rand.rand_yaw_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
+                else:
+                    rand_yaw = torch.zeros(len(env_ids), device=self.device)
+                if self.cfg.domain_rand.randomize_start_pitch:
+                    rand_pitch = self.cfg.domain_rand.rand_pitch_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
                 else:
                     rand_pitch = torch.zeros(len(env_ids), device=self.device)
-                quat = quat_from_euler_xyz(0*rand_yaw, rand_pitch, rand_yaw) 
-                self.root_states[env_ids, 3:7] = quat[:, :]  
-            if self.cfg.env.randomize_start_y:
-                self.root_states[env_ids, 1] += self.cfg.env.rand_y_range * torch_rand_float(-1, 1, (len(env_ids), 1), device=self.device).squeeze(1)
-            
-        else:
-            self.root_states[env_ids] = self.base_init_state
-            self.root_states[env_ids, :3] += self.env_origins[env_ids]
+                quat = quat_from_euler_xyz(0 * rand_yaw, rand_pitch, rand_yaw)
+                self.root_states[env_ids, 3:7] = quat
+        
         env_ids_int32 = env_ids.to(dtype=torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
                                                      gymtorch.unwrap_tensor(self.root_states),
@@ -1251,21 +1287,23 @@ class HumanoidRobot(BaseTask):
         
         # 上肢已固定合并，移除上肢动作相关变量
         # self.random_upper_actions, self.current_upper_actions, self.delta_upper_actions 已删除
+        self.Kp_factors = torch.ones(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.Kd_factors = torch.ones(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.joint_injection = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         self.actuation_offset = torch.zeros(self.num_envs, self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
         
+        if self.cfg.domain_rand.randomize_kp:
+            self.Kp_factors = torch_rand_float(self.cfg.domain_rand.kp_range[0], self.cfg.domain_rand.kp_range[1], (self.num_envs, self.num_actions), device=self.device)
+        if self.cfg.domain_rand.randomize_kd:
+            self.Kd_factors = torch_rand_float(self.cfg.domain_rand.kd_range[0], self.cfg.domain_rand.kd_range[1], (self.num_envs, self.num_actions), device=self.device)
         if self.cfg.domain_rand.randomize_joint_injection:
             self.joint_injection = torch_rand_float(self.cfg.domain_rand.joint_injection_range[0], self.cfg.domain_rand.joint_injection_range[1], (self.num_envs, self.num_dof), device=self.device) * self.torque_limits.unsqueeze(0)
         if self.cfg.domain_rand.randomize_actuation_offset:
             self.actuation_offset = torch_rand_float(self.cfg.domain_rand.actuation_offset_range[0], self.cfg.domain_rand.actuation_offset_range[1], (self.num_envs, self.num_dof), device=self.device) * self.torque_limits.unsqueeze(0)
-        if self.cfg.domain_rand.randomize_payload_mass:
-            self.payload = torch_rand_float(self.cfg.domain_rand.payload_mass_range[0], self.cfg.domain_rand.payload_mass_range[1], (self.num_envs, 1), device=self.device)
-            self.hand_payload = torch_rand_float(self.cfg.domain_rand.hand_payload_mass_range[0], self.cfg.domain_rand.hand_payload_mass_range[1], (self.num_envs ,2), device=self.device)
-
+        # com_displacement 用于base的质心偏移（非上肢相关）
+        self.com_displacement = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
         if self.cfg.domain_rand.randomize_com_displacement:
             self.com_displacement = torch_rand_float(self.cfg.domain_rand.com_displacement_range[0], self.cfg.domain_rand.com_displacement_range[1], (self.num_envs, 3), device=self.device)
-        if self.cfg.domain_rand.randomize_body_displacement:
-            self.body_displacement = torch_rand_float(self.cfg.domain_rand.body_displacement_range[0], self.cfg.domain_rand.body_displacement_range[1], (self.num_envs, 3), device=self.device)
             
         #store friction and restitution
         self.friction_coeffs = torch.ones(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
@@ -1428,34 +1466,12 @@ class HumanoidRobot(BaseTask):
         self.actor_handles = []
         self.envs = []
         
-        self.payload = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
-        self.hand_payload = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
-        self.com_displacement = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
-        if self.cfg.domain_rand.randomize_payload_mass:
-            self.payload = torch_rand_float(self.cfg.domain_rand.payload_mass_range[0], self.cfg.domain_rand.payload_mass_range[1], (self.num_envs, 1), device=self.device)
-            self.hand_payload = torch_rand_float(self.cfg.domain_rand.hand_payload_mass_range[0], self.cfg.domain_rand.hand_payload_mass_range[1], (self.num_envs, 2), device=self.device)
-        if self.cfg.domain_rand.randomize_com_displacement:
-            self.com_displacement = torch_rand_float(self.cfg.domain_rand.com_displacement_range[0], self.cfg.domain_rand.com_displacement_range[1], (self.num_envs, 3), device=self.device)
-        if self.cfg.domain_rand.randomize_body_displacement:
-            self.body_displacement = torch_rand_float(self.cfg.domain_rand.body_displacement_range[0], self.cfg.domain_rand.body_displacement_range[1], (self.num_envs, 3), device=self.device)
-        
-        # 上肢已固定，注释掉相关索引（如果不存在会报错）
-        # self.torso_body_index = self.body_names.index("torso_link")
-        # self.left_hand_index = self.body_names.index("left_hand_palm_link")
-        # self.right_hand_index = self.body_names.index("right_hand_palm_link")   
-        
         self.mass_params_tensor = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
  
         for i in range(self.num_envs):
             # create env instance
             env_handle = self.gym.create_env(self.sim, env_lower, env_upper, int(np.sqrt(self.num_envs)))
-            pos = self.env_origins[i].clone()
-            if self.cfg.domain_rand.randomize_start_pos:
-                pos[:2] += torch_rand_float(-1., 1., (2,1), device=self.device).squeeze(1)
-            if self.cfg.domain_rand.randomize_start_yaw:
-                rand_yaw_quat = gymapi.Quat.from_euler_zyx(0., 0., self.cfg.domain_rand.rand_yaw_range*np.random.uniform(-1, 1))
-                start_pose.r = rand_yaw_quat
-            start_pose.p = gymapi.Vec3(*(pos + self.base_init_state[:3]))
+            start_pose.p = gymapi.Vec3(*(self.env_origins[i] + self.base_init_state[:3]))
                 
             rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
             self.gym.set_asset_rigid_shape_properties(robot_asset, rigid_shape_props)
@@ -1471,6 +1487,13 @@ class HumanoidRobot(BaseTask):
         
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
+            
+            # 在第一个环境中保存默认值（用于后续的域随机化）
+            if i == 0:
+                self.default_com = copy.deepcopy(body_props[0].com)
+                for j in range(len(body_props)):
+                    self.default_rigid_body_mass[j] = body_props[j].mass
+            
             body_props, mass_params = self._process_rigid_body_props(body_props, i)
             self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)

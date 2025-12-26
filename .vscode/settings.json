@@ -1,5 +1,6 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "cmake.sourceDirectory": "/home/cft/kelun/Humanoid-Terrain-Bench/HomieDeploy/elevation_mapping_humanoid/fast_lio_mid360"
 }
