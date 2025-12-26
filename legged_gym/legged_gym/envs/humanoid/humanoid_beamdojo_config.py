@@ -141,23 +141,23 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
     
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True            # 随机化摩擦系数
-        friction_range = [0.8, 0.8]         # 恢复原始摩擦系数
+        friction_range = [0.8, 0.8]         # 恢复原始摩擦系数 
         randomize_base_mass = True          # 随机化质量
-        added_mass_range = [-2.0, 2.0]      # 负载质量 U(-2.0, 2.0) kg
+        added_mass_range = [-2.0, 2.0]      # 负载质量 U(-2.0, 2.0) kg correct
         randomize_base_com = True           # 随机化质心位置
-        added_com_range = [-0.05, 0.05]     # 质心偏移 U(-0.05, 0.05) m
+        added_com_range = [-0.05, 0.05]     # 质心偏移 U(-0.05, 0.05) m correct
         push_robots = True                   # 启用外部推力（抗干扰训练）
         push_interval_s = 8                  # 推力间隔：每8秒推一次
-        max_push_vel_xy = 0.5                # 最大推力速度：±0.5 m/s
+        max_push_vel_xy = 0.5                # 最大推力速度：±0.5 m/s correct
 
-        randomize_motor = True              # 随机化电机特性
-        motor_strength_range = [0.9, 1.1]   # 电机强度噪声 U(0.9, 1.1)
+        randomize_motor = True              # 随机化电机特性 
+        motor_strength_range = [0.9, 1.1]   # 电机强度噪声 U(0.9, 1.1) correct
         
         randomize_actuator_offset = True    # 随机化执行器零位偏移
-        actuator_offset_range = [-0.05, 0.05]  # 执行器偏移 U(-0.05, 0.05) rad
+        actuator_offset_range = [-0.05, 0.05]  # 执行器偏移 U(-0.05, 0.05) rad false
         
         randomize_pd_gains = True           # 随机化PD增益
-        pd_gain_range = [0.85, 1.15]        # Kp/Kd噪声因子 U(0.85, 1.15)
+        pd_gain_range = [0.85, 1.15]        # Kp/Kd噪声因子 U(0.85, 1.15) false
 
         # 动作延迟相关参数（BeamDojo域随机化）
         delay_update_global_steps = 24 * 8000  # 延迟更新的全局步数
