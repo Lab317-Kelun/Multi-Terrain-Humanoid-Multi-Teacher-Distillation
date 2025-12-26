@@ -476,15 +476,15 @@ class OnPolicyRunner:
             for key in locs['ep_infos'][0]:
                 infotensor = torch.tensor([], device=self.device)
                 for ep_info in locs['ep_infos']:
-                    # handle scalar and zero dimensional tensor infos
                     if not isinstance(ep_info[key], torch.Tensor):
                         ep_info[key] = torch.Tensor([ep_info[key]])
                     if len(ep_info[key].shape) == 0:
                         ep_info[key] = ep_info[key].unsqueeze(0)
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
-                wandb_dict['Episode_rew/' + key] = value
-                ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+                clean_key = key.replace('rew_', '')
+                wandb_dict['Episode/reward/' + clean_key] = float(value)
+                ep_string += f"""{f'Mean episode {clean_key}:':>{pad}} {value:.4f}\n"""
         mean_std = self.alg.actor_critic.std.mean()
         fps = int(self.num_steps_per_env * self.env.num_envs / (locs['collection_time'] + locs['learn_time']))
 
@@ -663,6 +663,7 @@ class OnPolicyRunner:
             wandb_dict['Train/mean_reward_task'] = wandb_dict['Train/mean_reward'] - wandb_dict['Train/mean_reward_explr']
             wandb_dict['Train/mean_reward_entropy'] = statistics.mean(locs['rew_entropy_buffer'])
             wandb_dict['Train/mean_episode_length'] = statistics.mean(locs['lenbuffer'])
+            wandb_dict['Episode/reward_total'] = statistics.mean(locs['rewbuffer'])
             
             # 添加自定义参数记录示例
             # 你可以在这里添加任何你想记录的参数
