@@ -18,8 +18,8 @@ class combine_config:
                 single_terrain.stair,     # 5: 楼梯地形
                 single_terrain.wave,      # 6: 波浪地形
                 single_terrain.slope,     # 7: 斜坡地形
-                single_terrain.gap,       # 8: 间隙地形（跳跃挑战）
-                single_terrain.plot,      # 9: 绘图地形（可视化用）
+                single_terrain.gap,       # 8: 间隙地形
+                single_terrain.plot,      # 9: 绘图地形
                 single_terrain.flat_gap,   # 10: 组合地形（左边平地+右边间隙）
                 single_terrain.flat_Stones_Everywhere, #11
                 single_terrain.flat_Stones_Middle_Start, #12
@@ -40,7 +40,9 @@ class combine_config:
         ]
 
         proportions = [
-                ("single", 8, 1)
+                ("single", 14, 1),
+                # ("single", 3, 1)
+                
         ]
 
 class generator:

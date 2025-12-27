@@ -73,5 +73,5 @@ class terrain_config:
         # ]
         dataset_points_y = [-0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         # === 地形处理参数 ===
-        slope_treshold = 1.5            # 坡度阈值：超过此值的斜坡会被修正为垂直表面
+        slope_treshold = 0.99            # 坡度阈值：超过此值的斜坡会被修正为垂直表面
         origin_zero_z = True            # 环境原点的Z坐标是否为0（True=在地面，False=在地形高度）
