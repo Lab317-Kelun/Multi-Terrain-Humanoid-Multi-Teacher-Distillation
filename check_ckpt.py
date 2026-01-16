@@ -3,9 +3,10 @@ import os
 
 # Checkpoint paths to compare
 ckpt_paths = [
-    "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/14model_43000.pt",
-    "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/8model_9000.pt",
-    "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/model_7000.pt"
+    # "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec14_20-09-35--homie_stage2_stone/model_32500.pt",
+    # "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec14_20-08-39--homie_stage2_gap/model_20000.pt",
+    # "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/model_7000.pt"
+    "/home/cft/zikang/State-Estimation-AMP-Lab/unitree_rl_lab/logs/rsl_rl_MLE/2025-12-29_21-16-34_MLE_ensemble_3/model_18300.pt"
 ]
 
 output_file = "checkpoint_keys_comparison.txt"

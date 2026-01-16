@@ -86,7 +86,7 @@ class MultiStudentTeacher(nn.Module):
             student_actor_hidden_dims = student_hidden_dims if student_hidden_dims is not None else [256, 256, 256]
         if teacher_actor_hidden_dims is None:
             teacher_actor_hidden_dims = teacher_hidden_dims if teacher_hidden_dims is not None else [256, 256, 256]
-
+        
         # Resolve activation module
         activation_mod = get_activation(activation)
 

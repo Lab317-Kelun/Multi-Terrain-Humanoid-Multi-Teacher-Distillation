@@ -49,8 +49,8 @@ def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
 def play(args):
     faulthandler.enable()
     exptid = args.exptid
-    log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
-
+    #log_pth = "../../logs/{}/".format(args.proj_name) + args.exptid
+    log_pth = args.checkpoint_path
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
     # override some parameters for testing
     if args.nodelay:
@@ -91,7 +91,7 @@ def play(args):
     env: HumanoidRobot
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     obs = env.get_observations()
-
+    
     train_cfg.runner.resume = True
     ppo_runner, train_cfg, log_pth = task_registry.make_alg_runner(log_root = log_pth, env=env, name=args.task, args=args, train_cfg=train_cfg, return_log_dir=True)
     policy = ppo_runner.get_inference_policy(device=env.device)

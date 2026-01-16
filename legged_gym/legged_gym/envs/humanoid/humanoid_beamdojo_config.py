@@ -70,7 +70,7 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         
         # 启用接触信息
         include_foot_contacts = True
-        use_double_critic = True
+        use_double_critic = False
         
         next_goal_threshold = 0.5
         reach_goal_delay = 0.05
@@ -402,7 +402,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         tanh_encoder_output = False  # 编码器输出是否使用tanh激活
         
         # 支持双Critic的编码器
-        use_double_critic = True  # 在这里可以启用双Critic
+        use_double_critic = False  # 在这里可以启用双Critic
         
     class algorithm(LeggedRobotCfgPPO.algorithm):
         """BEAMDOJO PPO算法配置"""
@@ -422,7 +422,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         adam_epsilon = 1e-8
         
         # BEAMDOJO双Critic配置
-        use_double_critic = True      # 设置为True启用双Critic
+        use_double_critic = False      # 设置为True启用双Critic
         dense_value_loss_coef = 1.0    # 密集奖励价值损失系数
         sparse_value_loss_coef = 1.0   # 稀疏奖励价值损失系数
         advantage_merge_weight = 0.5   # 优势函数合并权重

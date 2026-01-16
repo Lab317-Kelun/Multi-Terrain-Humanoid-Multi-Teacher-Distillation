@@ -17,9 +17,11 @@ import torch
 # Map terrain_id (int) to checkpoint path (str)
 # Please update these paths with actual checkpoints corresponding to each terrain type
 TEACHER_CHECKPOINTS = {
-     14: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/14model_43000.pt",
+     #14: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/14model_43000.pt",
      #8: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/legged_gym/logs/teachers/8model_9000.pt",
      #3: "/home/cft/yanzhe/Multi-Terrain-Humanoid-Multi-Teacher-Distillation/model_7000.pt",
+     14: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec14_20-09-35--homie_stage2_stone/model_32500.pt",
+     8: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec14_20-08-39--homie_stage2_gap/model_20000.pt"
 }
 
 def build_distillation_cfg(env_cfg) -> Dict:
@@ -105,6 +107,36 @@ def build_distillation_cfg(env_cfg) -> Dict:
     }
     return cfg
 
+def get_load_path(root, load_run=-1, checkpoint=-1, model_name_include="model"):
+    if not os.path.exists(root):
+        print(f"Logging directory {root} does not exist.")
+        return None, None
+        
+    if load_run == -1:
+        # Find the latest run
+        runs = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+        runs.sort(key=lambda x: os.path.getmtime(os.path.join(root, x)))
+        if not runs:
+            print(f"No runs found in {root}")
+            return None, None
+        load_run = runs[-1]
+    
+    run_dir = os.path.join(root, load_run)
+    
+    if checkpoint == -1:
+        models = [file for file in os.listdir(run_dir) if model_name_include in file and file.endswith(".pt")]
+        models.sort(key=lambda m: int(m.split("_")[-1].split(".")[0]))
+        if not models:
+            print(f"No models found in {run_dir}")
+            return None, None
+        checkpoint = models[-1]
+    else:
+        # If checkpoint is a number, construct the filename
+        if isinstance(checkpoint, int) or (isinstance(checkpoint, str) and checkpoint.isdigit()):
+             checkpoint = f"model_{checkpoint}.pt"
+    
+    return os.path.join(run_dir, checkpoint), load_run
+
 
 def prepare_log_dir(args) -> str:
     if not getattr(args, "proj_name", None):
@@ -115,6 +147,8 @@ def prepare_log_dir(args) -> str:
     log_dir = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", args.proj_name, stamp)
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
+
+
 
 
 def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str) -> None:
@@ -190,6 +224,7 @@ def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str
             elif "actor_obs_normalizer." in k:
                 norm_state_dict[k.replace("actor_obs_normalizer.", "")] = v
             elif not k.startswith("critic.") and not k.startswith("std"):
+                print(f"Warning: Unexpected key in teacher checkpoint: {k}")
                 actor_state_dict[k] = v
 
         for idx, teacher in enumerate(runner.alg.policy.teachers):
@@ -208,13 +243,24 @@ def load_teacher_policy(runner: DistillationRunner, checkpoint: str, device: str
 def maybe_resume_student(runner: DistillationRunner, checkpoint: str | None, device: str) -> None:
     if not checkpoint:
         return
+    
+    print(f"Resuming student from: {checkpoint}")
     state = torch.load(checkpoint, map_location=device)
+    
+    # 1. Load Policy (Student + Teachers + Normalizers)
     policy_state = state.get("policy_state_dict")
     if policy_state:
         runner.alg.policy.load_state_dict(policy_state, strict=False)
+    
+    # 2. Load Optimizer
     optimizer_state = state.get("optimizer_state_dict")
     if optimizer_state:
         runner.alg.optimizer.load_state_dict(optimizer_state)
+        
+    # 3. Restore Iteration Count
+    current_iter = state.get("iter", 0)
+    runner.current_learning_iteration = current_iter
+    print(f"Resumed at iteration {current_iter}")
 
 
 def main():
@@ -222,20 +268,34 @@ def main():
     if getattr(args, "task", None) in (None, "h1_2_fix"):
         args.task = "humanoid_beamdojo"
 
+    # Set default project name if not provided
+    if not getattr(args, "proj_name", None):
+        args.proj_name = "beamdojo"
+
     log_dir = prepare_log_dir(args)
 
     env, env_cfg = task_registry.make_env(name=args.task, args=args)
     train_cfg = build_distillation_cfg(env_cfg)
 
     runner = DistillationRunner(env, train_cfg, log_dir=log_dir, device=args.rl_device)
+    
+    # 1. Load Teachers (Base initialization)
     load_teacher_policy(runner, args.teacher_checkpoint, args.rl_device)
-    maybe_resume_student(runner, getattr(args, "student_checkpoint", None), args.rl_device)
+    
+    # 2. Determine Checkpoint for Resume
+    student_checkpoint = getattr(args, "student_checkpoint", None)
+    if args.resume:
+        load_root = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", args.proj_name)
+        student_checkpoint, found_run = get_load_path(root=load_root, load_run=args.load_run, checkpoint=args.checkpoint)
+        print(f"Auto-resolved resume checkpoint: {student_checkpoint} (Run: {found_run})")
+
+    # 3. Resume Student (Overwrites policy if checkpoint provided)
+    maybe_resume_student(runner, student_checkpoint, args.rl_device)
 
     num_iterations = args.distill_iters or train_cfg.get("max_iterations", 1000)
     print(f"🚀 Starting distillation for {num_iterations} iterations. Logs: {log_dir}")
     runner.learn(num_iterations, init_at_random_ep_len=True)
     print("✅ Distillation finished.")
-
 
 if __name__ == "__main__":
     main()

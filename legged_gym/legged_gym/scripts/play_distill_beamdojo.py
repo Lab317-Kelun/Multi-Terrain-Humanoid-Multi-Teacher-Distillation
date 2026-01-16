@@ -59,7 +59,7 @@ def build_distillation_cfg(env_cfg) -> Dict:
         "student_num_hist": num_hist,
         "student_actor_hidden_dims": list(policy_defaults.actor_hidden_dims),
         "student_hist_encoding": True,
-        "student_obs_normalization": False,
+        "student_obs_normalization": True,
         # Teacher layout (full information)
         "teacher_num_prop": num_prop,
         "teacher_num_scan": num_scan,

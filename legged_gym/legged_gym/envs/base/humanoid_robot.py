@@ -489,6 +489,11 @@ class HumanoidRobot(BaseTask):
         self.obs_history_buf[env_ids, :, :] = 0.  # reset obs history buffer TODO no 0s
         self.contact_buf[env_ids, :, :] = 0.
         self.action_history_buf[env_ids, :, :] = 0.
+
+        # Calculate success and completion rates
+        success_rate = torch.mean((self.cur_goal_idx[env_ids] >= self.cfg.terrain.num_goals).float())
+        completion_rate = torch.mean(self.cur_goal_idx[env_ids].float() / self.cfg.terrain.num_goals)
+
         self.cur_goal_idx[env_ids] = 0
         self.reach_goal_timer[env_ids] = 0
         
@@ -498,6 +503,8 @@ class HumanoidRobot(BaseTask):
 
         # fill extras
         self.extras["episode"] = {}
+        self.extras["episode"]["success_rate"] = success_rate
+        self.extras["episode"]["completion_rate"] = completion_rate
         for key in self.episode_sums.keys():
             self.extras["episode"]['rew_' + key] = torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
             self.episode_sums[key][env_ids] = 0.
