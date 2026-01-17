@@ -342,6 +342,19 @@ class Actor(nn.Module):
     
     def infer_priv_latent(self, obs):
         priv = obs[:, self.num_prop + self.num_scan + self.num_priv_explicit: self.num_prop + self.num_scan + self.num_priv_explicit + self.num_priv_latent]
+        if not hasattr(self, '_debug_priv_shape_printed'):
+            print(f"[RMA Debug] Privileged Latent Input Shape: {priv.shape}")
+            print(f"[RMA Debug] Expected Dimension: {self.num_priv_latent}")
+            if priv.shape[1] == self.num_priv_latent:
+                print(f"[RMA Debug] SUCCESS: Privileged latent dimension matches configuration ({self.num_priv_latent}).")
+            else:
+                print(f"[RMA Debug] ERROR: Privileged latent dimension mismatch! Got {priv.shape[1]}, expected {self.num_priv_latent}.")
+            
+            # Print mean/std to verify values are not all zero (randomization active)
+            print(f"[RMA Debug] Privileged Latent Mean: {priv.mean(dim=0)}")
+            print(f"[RMA Debug] Privileged Latent Std: {priv.std(dim=0)}")
+            self._debug_priv_shape_printed = True
+            
         return self.priv_encoder(priv)
     
     def infer_hist_latent(self, obs):
