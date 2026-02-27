@@ -129,6 +129,82 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         hip_reduction = 1.0
     
     class domain_rand(LeggedRobotCfg.domain_rand):
+        # Homie + BeamDojo 补充的域随机化参数（共12个）
+        # randomize_base_mass = True          # 随机化质量
+        # added_mass_range = [-2.0, 2.0]      # 负载质量 U(-2.0, 2.0) kg
+        # randomize_base_com = True           # 随机化质心位置
+        # added_com_range = [-0.05, 0.05]     # 质心偏移 U(-0.05, 0.05) m
+
+        # randomize_motor = True              # 随机化电机特性
+        # motor_strength_range = [0.9, 1.1]   # 电机强度噪声 U(0.9, 1.1)
+        
+        # randomize_actuator_offset = True    # 随机化执行器零位偏移
+        # actuator_offset_range = [-0.05, 0.05]  # 执行器偏移 U(-0.05, 0.05) rad
+
+        # # 动作延迟相关参数（BeamDojo域随机化）
+        # delay_update_global_steps = 24 * 8000  # 延迟更新的全局步数
+        # action_delay = True              # 是否启用动作延迟
+        # action_curr_step = [1, 1]         # 当前动作步数范围
+        # action_curr_step_scratch = [0, 1] # 从头训练时的动作步数范围
+        # action_delay_view = 1             # 动作延迟视图
+        # action_buf_len = 8                # 动作缓冲区长度
+        
+        # use_random = True
+        
+        # randomize_joint_injection = use_random
+        # joint_injection_range = [-0.05, 0.05]
+        
+        # randomize_actuation_offset = use_random
+        # actuation_offset_range = [-0.05, 0.05]
+
+        # randomize_payload_mass = use_random
+        # payload_mass_range = [-5, 10]
+        
+        # hand_payload_mass_range = [-0.1, 0.3]
+
+        # randomize_com_displacement = use_random
+        # com_displacement_range = [-0.1, 0.1]
+        
+        # randomize_body_displacement = use_random
+        # body_displacement_range = [-0.1, 0.1]
+
+        # randomize_link_mass = use_random
+        # link_mass_range = [0.8, 1.2]
+        
+        # randomize_friction = use_random
+        # friction_range = [0.1, 3.0]
+        
+        # randomize_restitution = use_random
+        # restitution_range = [0.0, 1.0]
+        
+        # randomize_kp = use_random
+        # kp_range = [0.9, 1.1]
+        
+        # randomize_kd = use_random
+        # kd_range = [0.9, 1.1]
+        
+        # randomize_initial_joint_pos = use_random
+        # initial_joint_pos_scale = [0.8, 1.2]
+        # initial_joint_pos_offset = [-0.1, 0.1]
+        
+        # push_robots = use_random
+        # push_interval_s = 4
+        # upper_interval_s = 1
+        # max_push_vel_xy = 0.5
+        
+        # init_upper_ratio = 0.
+        # delay = use_random
+        
+        # randomize_start_pos = False    # 是否随机化起始位置
+        # randomize_start_vel = False    # 是否随机化起始速度
+        # randomize_start_yaw = False    # 是否随机化起始偏航角
+        # rand_yaw_range = 1.2          # 偏航角随机范围
+        # randomize_start_y = False     # 是否随机化Y轴起始位置
+        # rand_y_range = 0.5            # Y轴随机范围
+        # randomize_start_pitch = False  # 是否随机化起始俯仰角
+        # rand_pitch_range = 1.6        # 俯仰角随机范围
+
+        # 无Homie部分的对照之前sim2real效果不好的域随机化参数
         randomize_friction = True            # 随机化摩擦系数
         friction_range = [0.8, 0.8]         # 恢复原始摩擦系数
         randomize_base_mass = True          # 随机化质量
@@ -178,9 +254,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         randomize_link_mass = use_random
         link_mass_range = [0.8, 1.2]
         
-        randomize_friction = use_random
-        friction_range = [0.1, 3.0]
-        
         randomize_restitution = use_random
         restitution_range = [0.0, 1.0]
         
@@ -193,11 +266,6 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         randomize_initial_joint_pos = use_random
         initial_joint_pos_scale = [0.8, 1.2]
         initial_joint_pos_offset = [-0.1, 0.1]
-        
-        push_robots = use_random
-        push_interval_s = 4
-        upper_interval_s = 1
-        max_push_vel_xy = 0.5
         
         init_upper_ratio = 0.
         delay = use_random
@@ -357,10 +425,10 @@ class HumanoidBEAMDOJOCfg(LeggedRobotCfg):
         add_noise = True
         noise_level = 1.0
         class noise_scales:
-            dof_pos = 0.01
-            dof_vel = 1.5
+            dof_pos = 0.02
+            dof_vel = 2.0
             lin_vel = 0.1
-            ang_vel = 0.2
+            ang_vel = 0.5
             gravity = 0.05
             height_measurement = 0.1
             
@@ -436,7 +504,7 @@ class HumanoidBEAMDOJOCfgPPO(LeggedRobotCfgPPO):
         num_steps_per_env = 24  
         max_iterations = 100000
         
-        save_interval = 100
+        save_interval = 500
         experiment_name = 'humanoid_beamdojo'
         run_name = ''
         

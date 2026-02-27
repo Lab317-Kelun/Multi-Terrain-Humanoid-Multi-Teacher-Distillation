@@ -22,8 +22,8 @@ class terrain_config:
         curriculum = True               # 是否启用课程学习（难度递增）
         
         # === 物理属性 ===
-        static_friction = [0.4, 1.0]   # 静摩擦系数 U(0.4, 1.0)
-        dynamic_friction = [0.4, 1.0]  # 动摩擦系数 U(0.4, 1.0)
+        static_friction = [0.1, 3.0]   # 静摩擦系数 U(0.4, 1.0)
+        dynamic_friction = [0.1, 3.0]  # 动摩擦系数 U(0.4, 1.0)
         restitution = [0.0, 0.3]       # 弹性系数 U(0.0, 0.3)
         
         # === 高度测量配置===

@@ -40,8 +40,13 @@ class combine_config:
         ]
 
         proportions = [
+<<<<<<< HEAD
                 ("single", 8, 1),
                 # ("single", 3, 1)
+=======
+                ("single", 14, 0.5),
+                # ("single", 8, 0.5)
+>>>>>>> 84edb486532c14f431a9f6688c85cd6c2e7a9ffe
                 
         ]
 
