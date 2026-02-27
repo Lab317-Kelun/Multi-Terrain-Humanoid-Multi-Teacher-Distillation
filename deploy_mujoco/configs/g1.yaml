@@ -1,8 +1,8 @@
 # 策略模型路径：JIT编译的PyTorch模型文件（.pt格式）
-policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Dec04_22-07-55--homie_stage2_gap_rew/traced/Dec04_22-07-55--homie_stage2_gap_rew-100-mujoco_jit.pt"
+policy_path: "/home/cft/kelun/Humanoid-Terrain-Bench/legged_gym/logs/beamdojo/Jan13_02-39-47--stage2_gap_no_domain_rand_xzk/traced/Jan13_02-39-47--stage2_gap_no_domain_rand_xzk-77500-mujoco_jit.pt"
 # MuJoCo机器人模型路径：XML格式的机器人模型文件
-xml_path: "./resources/robots/g1_description/g1.xml"
-# xml_path: "./resources/robots/g1_description/gap.xml"
+# xml_path: "./resources/robots/g1_description/g1.xml"
+xml_path: "./resources/robots/g1_description/gap.xml"
 
 # ========== 功能开关配置 ==========
 use_lidar: true          # 是否使用雷达扫描数据
@@ -52,4 +52,4 @@ num_actions: 12         # 动作维度（12个下半身关节）
 obs_history_len: 10      # 历史长度（10步）
 
 # ========== 速度指令配置 ==========
-cmd_init: [0.5, 0, 0]   # 初始速度指令：[vx, vy, vyaw] (m/s, m/s, rad/s)
+cmd_init: [0.8, 0.0, 0.0]   # 初始速度指令：[vx, vy, vyaw] (m/s, m/s, rad/s)
